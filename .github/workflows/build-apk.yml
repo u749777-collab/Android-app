@@ -32,6 +32,23 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Debug — показать файлы в корне
+        run: |
+          echo "=== Текущая папка ==="
+          pwd
+          echo "=== Файлы в корне ==="
+          ls -la
+          echo "=== Поиск package.json ==="
+          find . -name "package.json" -not -path "./node_modules/*"
+          echo "=== Проверка package.json ==="
+          if [ -f package.json ]; then
+            echo "package.json найден"
+            cat package.json | head -30
+          else
+            echo "ОШИБКА: package.json не найден в корне!"
+            exit 1
+          fi
+
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
