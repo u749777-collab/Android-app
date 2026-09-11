@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "DayFlow",
+    "slug": "dayflow",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "platforms": ["android"],
+    "backgroundColor": "#0D1226",
+    "primaryColor": "#7C3AED",
+    "androidStatusBar": {
+      "barStyle": "light-content",
+      "backgroundColor": "#00000000",
+      "translucent": true
+    },
+    "androidNavigationBar": {
+      "barStyle": "light-content",
+      "backgroundColor": "#0D1226"
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "color": "#7C3AED",
+          "sounds": []
+        }
+      ]
+    ],
+    "android": {
+      "package": "com.dayflow.mobile",
+      "versionCode": 1,
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.RECEIVE_BOOT_COMPLETED"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    }
+  }
+}
