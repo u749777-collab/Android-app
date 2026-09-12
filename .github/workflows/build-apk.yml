@@ -40,9 +40,8 @@ jobs:
         run: |
           echo "=== Текущая папка ==="
           pwd
-          echo "=== Файлы ==="
+          echo "=== Файлы в корне dayflow-app ==="
           ls -la
-          echo "=== package.json ==="
           if [ -f package.json ]; then
             echo "OK: package.json найден"
           else
@@ -50,21 +49,17 @@ jobs:
             exit 1
           fi
 
-      - name: Debug — проверить звуковые файлы
+      - name: Debug — найти звуковые файлы
         run: |
-          echo "=== assets/sounds ==="
-          if [ -d assets/sounds ]; then
-            ls -la assets/sounds
-          else
-            echo "ОШИБКА: папка assets/sounds не найдена"
-            exit 1
-          fi
+          echo "=== Поиск mp3 в dayflow-app ==="
+          find . -maxdepth 4 -name "sound-*.mp3" -not -path "./node_modules/*" || true
           for f in sound-complete.mp3 sound-celebrate.mp3 sound-timer.mp3; do
-            if [ ! -f "assets/sounds/$f" ]; then
-              echo "ОШИБКА: отсутствует assets/sounds/$f"
+            found=$(find . -maxdepth 4 -name "$f" -not -path "./node_modules/*" | head -n 1)
+            if [ -z "$found" ]; then
+              echo "ОШИБКА: $f не найден в dayflow-app"
               exit 1
             fi
-            echo "OK: $f найден"
+            echo "OK: $f найден → $found"
           done
 
       - name: Install dependencies
