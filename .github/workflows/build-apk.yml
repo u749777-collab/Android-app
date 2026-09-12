@@ -23,6 +23,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: dayflow-app/package-lock.json
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -50,8 +52,29 @@ jobs:
             exit 1
           fi
 
+      - name: Debug — проверить звуковые файлы
+        run: |
+          echo "=== assets/sounds ==="
+          if [ -d assets/sounds ]; then
+            ls -la assets/sounds
+          else
+            echo "ОШИБКА: папка assets/sounds не найдена"
+            exit 1
+          fi
+          for f in sound-complete.mp3 sound-celebrate.mp3 sound-timer.mp3; do
+            if [ ! -f "assets/sounds/$f" ]; then
+              echo "ОШИБКА: отсутствует assets/sounds/$f"
+              exit 1
+            fi
+            echo "OK: $f найден"
+          done
+
       - name: Install dependencies
         run: npm install --legacy-peer-deps
+
+      - name: Verify expo-av installed
+        run: |
+          node -e "require.resolve('expo-av'); console.log('OK: expo-av установлен')"
 
       - name: Generate native Android project
         run: npx expo prebuild --platform android --clean --no-install
