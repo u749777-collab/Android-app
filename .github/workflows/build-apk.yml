@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch: # позволяет запускать вручную из GitHub
+  workflow_dispatch:
 ​
 jobs:
   build:
@@ -12,26 +12,75 @@ jobs:
     runs-on: ubuntu-latest
 ​
     steps:
-      - name: Checkout code
+      # ── 1. Код ──────────────────────────────────────────────────────────
+      - name: Checkout
         uses: actions/checkout@v4
 ​
-      - name: Setup Node.js
+      # ── 2. Node.js ──────────────────────────────────────────────────────
+      - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 ​
+      # ── 3. Java (нужен Gradle и keytool) ────────────────────────────────
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+​
+      # ── 4. Android SDK ──────────────────────────────────────────────────
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+​
+      - name: Install Android platform + build-tools
+        run: |
+          sdkmanager --update
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+​
+      # ── 5. npm-зависимости ──────────────────────────────────────────────
       - name: Install dependencies
         run: npm ci
 ​
-      - name: Setup EAS
-        uses: expo/expo-github-action@v8
+      # ── 6. Генерация нативного Android-проекта из Expo ──────────────────
+      - name: Expo prebuild (generate android/)
+        run: npx expo prebuild --platform android --clean
+​
+      # ── 7. Keystore (создаётся здесь, в CI, без внешних сервисов) ───────
+      #   ВНИМАНИЕ: каждая сборка создаёт новый ключ.
+      #   Это значит, что при обновлении нужно сначала удалить
+      #   старое приложение с телефона, потом установить новое.
+      #   Для личного использования это нормально.
+      - name: Generate signing keystore
+        run: |
+          keytool -genkey -v \
+            -keystore android/app/release.keystore \
+            -alias dayflow \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass dayflow123 \
+            -keypass dayflow123 \
+            -dname "CN=DayFlow, O=DayFlow, C=RU"
+​
+      # ── 8. Сборка APK ───────────────────────────────────────────────────
+      - name: Build release APK
+        run: |
+          cd android
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=$(pwd)/app/release.keystore \
+            -Pandroid.injected.signing.store.password=dayflow123 \
+            -Pandroid.injected.signing.key.alias=dayflow \
+            -Pandroid.injected.signing.key.password=dayflow123
+​
+      # ── 9. Сохранить APK как артефакт GitHub ────────────────────────────
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-​
-      - name: Build APK (preview)
-        run: eas build -p android --profile preview --non-interactive
-​
-      - name: Print download URL
-        run: echo "APK ready — check the EAS dashboard or the link above"
+          name: DayFlow-build-${{ github.run_number }}
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
