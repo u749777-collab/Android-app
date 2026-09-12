@@ -1,75 +1,37 @@
-name: Build Android APK
-
+name: Build APK
+​
 on:
-  workflow_dispatch:
   push:
-    branches: [main]
-
+    branches:
+      - main
+  workflow_dispatch: # позволяет запускать вручную из GitHub
+​
 jobs:
   build:
-    name: Build APK
+    name: Build Android APK
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    defaults:
-      run:
-        working-directory: dayflow-app   # ← все шаги выполняются в этой папке
-
+​
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Setup Node
+​
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      - name: Setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Debug — показать файлы
-        run: |
-          echo "=== Текущая папка ==="
-          pwd
-          echo "=== Файлы ==="
-          ls -la
-          echo "=== package.json ==="
-          if [ -f package.json ]; then
-            echo "OK: package.json найден"
-          else
-            echo "ОШИБКА: package.json не найден"
-            exit 1
-          fi
-
+          cache: npm
+​
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
-
-      - name: Generate native Android project
-        run: npx expo prebuild --platform android --clean --no-install
-
-      - name: Build debug APK
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
-
-      - name: Rename APK
-        run: |
-          mkdir -p out
-          cp android/app/build/outputs/apk/debug/*.apk out/DayFlow.apk
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+        run: npm ci
+​
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
         with:
-          name: DayFlow-apk
-          path: dayflow-app/out/DayFlow.apk   # ← путь от корня репозитория!
-          retention-days: 30
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+​
+      - name: Build APK (preview)
+        run: eas build -p android --profile preview --non-interactive
+​
+      - name: Print download URL
+        run: echo "APK ready — check the EAS dashboard or the link above"
