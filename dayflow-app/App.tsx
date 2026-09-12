@@ -657,7 +657,9 @@ export default function App() {
                 <View style={styles.header}>
                   <View style={styles.flexShrink}>
                     <Text style={styles.eyebrow}>ТВОЙ ДЕНЬ</Text>
-                    <Text style={styles.heading}>{`Привет${userName ? \`, ${userName}\` : ''}!`}</Text>
+                    <Text style={styles.heading}>
+                      {userName ? `Привет, ${userName}!` : 'Привет!'}
+                    </Text>
                     <Text style={styles.date}>
                       {new Date().toLocaleDateString("ru-RU", {
                         weekday: "long",
