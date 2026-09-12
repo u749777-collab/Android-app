@@ -42,6 +42,7 @@ jobs:
           pwd
           echo "=== Файлы ==="
           ls -la
+          echo "=== package.json ==="
           if [ -f package.json ]; then
             echo "OK: package.json найден"
           else
