@@ -587,9 +587,9 @@ export default function App() {
         setSoundEnabled(enabled);
         soundEnabledRef.current = enabled;
         const [c, cel, t] = await Promise.all([
-          Audio.Sound.createAsync(require('./assets/sounds/sound-complete.mp3'), { shouldPlay: false, volume: 0.7 }),
-          Audio.Sound.createAsync(require('./assets/sounds/sound-celebrate.mp3'), { shouldPlay: false, volume: 0.8 }),
-          Audio.Sound.createAsync(require('./assets/sounds/sound-timer.mp3'), { shouldPlay: false, volume: 0.7 }),
+          Audio.Sound.createAsync(require('./sound-complete.mp3'), { shouldPlay: false, volume: 0.7 }),
+          Audio.Sound.createAsync(require('./sound-celebrate.mp3'), { shouldPlay: false, volume: 0.8 }),
+          Audio.Sound.createAsync(require('./sound-timer.mp3'), { shouldPlay: false, volume: 0.7 }),
         ]);
         if (!alive) return;
         soundsRef.current = { complete: c.sound, celebrate: cel.sound, timer: t.sound };
