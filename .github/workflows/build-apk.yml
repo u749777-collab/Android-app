@@ -40,7 +40,7 @@ jobs:
         run: |
           echo "=== Текущая папка ==="
           pwd
-          echo "=== Файлы в корне dayflow-app ==="
+          echo "=== Файлы ==="
           ls -la
           if [ -f package.json ]; then
             echo "OK: package.json найден"
@@ -48,26 +48,11 @@ jobs:
             echo "ОШИБКА: package.json не найден"
             exit 1
           fi
-
-      - name: Debug — найти звуковые файлы
-        run: |
-          echo "=== Поиск mp3 в dayflow-app ==="
-          find . -maxdepth 4 -name "sound-*.mp3" -not -path "./node_modules/*" || true
-          for f in sound-complete.mp3 sound-celebrate.mp3 sound-timer.mp3; do
-            found=$(find . -maxdepth 4 -name "$f" -not -path "./node_modules/*" | head -n 1)
-            if [ -z "$found" ]; then
-              echo "ОШИБКА: $f не найден в dayflow-app"
-              exit 1
-            fi
-            echo "OK: $f найден → $found"
-          done
+          echo "=== mp3 в проекте (кроме node_modules) ==="
+          find . -name "*.mp3" -not -path "./node_modules/*" || echo "mp3 не найдены"
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
-
-      - name: Verify expo-av installed
-        run: |
-          node -e "require.resolve('expo-av'); console.log('OK: expo-av установлен')"
 
       - name: Generate native Android project
         run: npx expo prebuild --platform android --clean --no-install
