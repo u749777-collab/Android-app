@@ -1,60 +1,61 @@
-name: Build APK
+name: Build Android APK
 ​
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+  push:
+    branches: [main]
 ​
 jobs:
   build:
-    name: Build Android APK
+    name: Build APK
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+​
+    defaults:
+      run:
+        working-directory: dayflow-app
 ​
     steps:
-      # ── 1. Код ──────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 ​
-      # ── 2. Node.js ──────────────────────────────────────────────────────
-      - name: Setup Node.js 20
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 ​
-      # ── 3. Java (нужен Gradle и keytool) ────────────────────────────────
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
+      - name: Setup Java
+        uses: actions/setup-java@v5
         with:
-          java-version: '17'
           distribution: temurin
+          java-version: 17
 ​
-      # ── 4. Android SDK ──────────────────────────────────────────────────
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 ​
-      - name: Install Android platform + build-tools
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+​
+      - name: Debug — показать файлы
         run: |
-          sdkmanager --update
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          echo "=== Текущая папка ==="
+          pwd
+          echo "=== Файлы ==="
+          ls -la
+          echo "=== package.json ==="
+          if [ -f package.json ]; then
+            echo "OK: package.json найден"
+          else
+            echo "ОШИБКА: package.json не найден"
+            exit 1
+          fi
 ​
-      # ── 5. npm-зависимости ──────────────────────────────────────────────
       - name: Install dependencies
-        run: npm ci
+        run: npm install --legacy-peer-deps
 ​
-      # ── 6. Генерация нативного Android-проекта из Expo ──────────────────
-      - name: Expo prebuild (generate android/)
-        run: npx expo prebuild --platform android --clean
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --clean --no-install
 ​
-      # ── 7. Keystore (создаётся здесь, в CI, без внешних сервисов) ───────
-      #   ВНИМАНИЕ: каждая сборка создаёт новый ключ.
-      #   Это значит, что при обновлении нужно сначала удалить
-      #   старое приложение с телефона, потом установить новое.
-      #   Для личного использования это нормально.
       - name: Generate signing keystore
         run: |
           keytool -genkey -v \
@@ -67,20 +68,25 @@ jobs:
             -keypass dayflow123 \
             -dname "CN=DayFlow, O=DayFlow, C=RU"
 ​
-      # ── 8. Сборка APK ───────────────────────────────────────────────────
       - name: Build release APK
         run: |
           cd android
+          chmod +x gradlew
           ./gradlew assembleRelease \
             -Pandroid.injected.signing.store.file=$(pwd)/app/release.keystore \
             -Pandroid.injected.signing.store.password=dayflow123 \
             -Pandroid.injected.signing.key.alias=dayflow \
-            -Pandroid.injected.signing.key.password=dayflow123
+            -Pandroid.injected.signing.key.password=dayflow123 \
+            --no-daemon --stacktrace
 ​
-      # ── 9. Сохранить APK как артефакт GitHub ────────────────────────────
+      - name: Rename APK
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/release/*.apk out/DayFlow.apk
+​
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: DayFlow-build-${{ github.run_number }}
-          path: android/app/build/outputs/apk/release/app-release.apk
+          name: DayFlow-apk
+          path: dayflow-app/out/DayFlow.apk
           retention-days: 30
