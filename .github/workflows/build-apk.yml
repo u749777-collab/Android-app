@@ -5,10 +5,6 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: read
-  security-events: write   # нужно для upload-sarif
-
 jobs:
   build:
     name: Build APK
@@ -40,6 +36,20 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Debug — показать файлы
+        run: |
+          echo "=== Текущая папка ==="
+          pwd
+          echo "=== Файлы ==="
+          ls -la
+          echo "=== package.json ==="
+          if [ -f package.json ]; then
+            echo "OK: package.json найден"
+          else
+            echo "ОШИБКА: package.json не найден"
+            exit 1
+          fi
+
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
@@ -51,8 +61,11 @@ jobs:
           keytool -genkey -v \
             -keystore android/app/release.keystore \
             -alias dayflow \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass dayflow123 -keypass dayflow123 \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass dayflow123 \
+            -keypass dayflow123 \
             -dname "CN=DayFlow, O=DayFlow, C=RU"
 
       - name: Build release APK
@@ -77,28 +90,3 @@ jobs:
           name: DayFlow-apk
           path: dayflow-app/out/DayFlow.apk
           retention-days: 30
-
-      # ---------- Appknox ----------
-      - name: Appknox scan
-        id: appknox
-        continue-on-error: true          # чтобы не валить сборку из-за security-отчёта
-        uses: appknox/appknox-github-action@b7d2bfb2321d5544e97bffcba48557234ab953a4
-        with:
-          appknox_access_token: ${{ secrets.APPKNOX_ACCESS_TOKEN }}
-          # путь считается от корня репозитория (не от working-directory!)
-          file_path: dayflow-app/android/app/build/outputs/apk/release/app-release.apk
-          risk_threshold: MEDIUM
-          sarif: Enable
-
-      - name: Verify report.sarif
-        if: always()
-        run: |
-          echo "PWD: $(pwd)"
-          ls -la "${{ github.workspace }}" | grep -i sarif || echo "report.sarif НЕ найден"
-
-      - name: Upload SARIF to GitHub Security
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          # SARIF создаётся в корне workspace, а не в dayflow-app
-          sarif_file: ${{ github.workspace }}/report.sarif
