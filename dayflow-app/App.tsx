@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
+import { Audio } from "expo-av";
 import { StatusBar } from "expo-status-bar";
 import React, {
   useCallback,
@@ -91,7 +92,7 @@ const meta: Record<
     gradient: gradient.sport,
   },
   study: {
-    icon: "◈",
+    icon: "📚",
     color: colors.blueSoft,
     subtitle: "Знания и развитие",
     gradient: gradient.study,
@@ -136,6 +137,13 @@ export default function App() {
   const [reminder, setReminder] = useState("18:00");
   const [celebration, setCelebration] = useState<string | null>(null);
   const [permissionDenied, setPermissionDenied] = useState(false);
+  const [userName, setUserName] = useState("");
+  const [showNamePrompt, setShowNamePrompt] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [editTaskId, setEditTaskId] = useState<string | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const soundsRef = useRef<Record<string, Audio.Sound>>({});
+  const soundEnabledRef = useRef(true);
 
   const completedFlags = useRef<Record<string, boolean>>({});
   const initialised = useRef(false);
@@ -153,8 +161,14 @@ export default function App() {
         loaded = defaultData();
       }
       const rolled = rollOverIfNewDay(loaded);
+      const storedName = await AsyncStorage.getItem('dayflow_name');
       if (!alive) return;
       setData(rolled);
+      if (!storedName) {
+        setShowNamePrompt(true);
+      } else {
+        setUserName(storedName);
+      }
       setReady(true);
       if (rolled.notifications) {
         const granted = await ensurePermission();
@@ -270,6 +284,7 @@ export default function App() {
             ? "Весь план на сегодня выполнен!"
             : `Раздел «${categoryTitle[key as Category]}» выполнен!`;
         setCelebration(message);
+        void playSound("celebrate");
         if (data.notifications) {
           notifyNow(
             key === "all" ? "День завершён" : "Отличная работа!",
@@ -288,6 +303,7 @@ export default function App() {
 
   const toggleTask = useCallback((task: Task) => {
     if (task.category === "leisure") return;
+    if (!task.isCompleted) void playSound("complete");
     gentleLayout();
     setData((prev) => ({
       ...prev,
@@ -360,6 +376,7 @@ export default function App() {
 
   const finishTimer = useCallback(async (task: Task) => {
     await cancel(task.timerId);
+    void playSound("timer");
     gentleLayout();
     setData((prev) => ({
       ...prev,
@@ -399,6 +416,7 @@ export default function App() {
   }, []);
 
   const openSheet = (category: Category) => {
+    setEditTaskId(null);
     setSheet(category);
     setTitle("");
     setDetail("");
@@ -413,6 +431,39 @@ export default function App() {
       Alert.alert("Добавь название", "Например: Приседания или Английский.");
       return;
     }
+
+    if (editTaskId) {
+      const duration = Math.round(Number(minutes.replace(",", ".")) * 60);
+      gentleLayout();
+      setData((prev) => ({
+        ...prev,
+        tasks: prev.tasks.map((item) =>
+          item.id === editTaskId
+            ? {
+                ...item,
+                title: name,
+                detail:
+                  detail.trim() ||
+                  (item.category === "leisure"
+                    ? formatLimit(duration)
+                    : "Задача на сегодня"),
+                ...(item.category === "leisure"
+                  ? {
+                      durationSeconds: duration,
+                      remainingSeconds: item.isRunning
+                        ? item.remainingSeconds
+                        : duration,
+                    }
+                  : { reminderTime: reminder.trim() }),
+              }
+            : item,
+        ),
+      }));
+      setEditTaskId(null);
+      setSheet(null);
+      return;
+    }
+
     if (sheet === "leisure") {
       const value = Number(minutes.replace(",", "."));
       if (!Number.isFinite(value) || value <= 0 || value > 24 * 60) {
@@ -478,6 +529,31 @@ export default function App() {
     ]);
   };
 
+  const taskOptions = (task: Task) => {
+    Alert.alert(task.title, "Что хочешь сделать?", [
+      { text: "Отмена", style: "cancel" },
+      {
+        text: "✏️ Внести правку",
+        onPress: () => {
+          setEditTaskId(task.id);
+          setSheet(task.category);
+          setTitle(task.title);
+          setDetail(task.detail || "");
+          if (task.category === "leisure") {
+            setMinutes(String(Math.round((task.durationSeconds ?? 3600) / 60)));
+          } else {
+            setReminder(task.reminderTime || "18:00");
+          }
+        },
+      },
+      {
+        text: "🗑 Удалить",
+        style: "destructive",
+        onPress: () => removeTask(task),
+      },
+    ]);
+  };
+
   const setNotifications = async (value: boolean) => {
     if (value) {
       const granted = await ensurePermission();
@@ -497,6 +573,47 @@ export default function App() {
         timerId: undefined,
       })),
     }));
+  };
+
+  useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const stored = await AsyncStorage.getItem('dayflow_sound');
+        if (!alive) return;
+        const enabled = stored !== 'false';
+        setSoundEnabled(enabled);
+        soundEnabledRef.current = enabled;
+        const [c, cel, t] = await Promise.all([
+          Audio.Sound.createAsync(require('./assets/sounds/sound-complete.mp3'), { shouldPlay: false, volume: 0.7 }),
+          Audio.Sound.createAsync(require('./assets/sounds/sound-celebrate.mp3'), { shouldPlay: false, volume: 0.8 }),
+          Audio.Sound.createAsync(require('./assets/sounds/sound-timer.mp3'), { shouldPlay: false, volume: 0.7 }),
+        ]);
+        if (!alive) return;
+        soundsRef.current = { complete: c.sound, celebrate: cel.sound, timer: t.sound };
+      } catch {
+        // sounds not critical
+      }
+    })();
+    return () => {
+      alive = false;
+      Object.values(soundsRef.current).forEach((s) => s.unloadAsync().catch(() => {}));
+    };
+  }, []);
+
+  const playSound = async (key: "complete" | "celebrate" | "timer") => {
+    if (!soundEnabledRef.current) return;
+    const sound = soundsRef.current[key];
+    if (!sound) return;
+    try { await sound.setPositionAsync(0); await sound.playAsync(); } catch {}
+  };
+
+  const toggleSound = async (value: boolean) => {
+    setSoundEnabled(value);
+    soundEnabledRef.current = value;
+    await AsyncStorage.setItem('dayflow_sound', value ? 'true' : 'false');
   };
 
   const resetAll = () => {
@@ -540,7 +657,7 @@ export default function App() {
                 <View style={styles.header}>
                   <View style={styles.flexShrink}>
                     <Text style={styles.eyebrow}>ТВОЙ ДЕНЬ</Text>
-                    <Text style={styles.heading}>Привет!</Text>
+                    <Text style={styles.heading}>{`Привет${userName ? \`, ${userName}\` : ''}!`}</Text>
                     <Text style={styles.date}>
                       {new Date().toLocaleDateString("ru-RU", {
                         weekday: "long",
@@ -599,7 +716,7 @@ export default function App() {
               <FadeSlide delay={110}>
                 <View style={styles.sectionHead}>
                   <Text style={styles.sectionTitle}>План на сегодня</Text>
-                  <Text style={styles.sectionHint}>удержание — удалить</Text>
+                  <Text style={styles.sectionHint}>удержание — правка / удалить</Text>
                 </View>
               </FadeSlide>
 
@@ -661,7 +778,7 @@ export default function App() {
                             onToggle={() => toggleTimer(task)}
                             onFinish={() => finishTimer(task)}
                             onReset={() => resetTimer(task)}
-                            onLongPress={() => removeTask(task)}
+                            onLongPress={() => taskOptions(task)}
                           />
                         ) : (
                           <TaskRow
@@ -669,7 +786,7 @@ export default function App() {
                             task={task}
                             color={meta[section.category].color}
                             onPress={() => toggleTask(task)}
-                            onLongPress={() => removeTask(task)}
+                            onLongPress={() => taskOptions(task)}
                           />
                         ),
                       )
@@ -728,8 +845,23 @@ export default function App() {
           )}
 
           {tab === "settings" && (
-            <SettingsScreen
-              key="settings"
+            <View key="settings">
+              <FadeSlide>
+                <View style={styles.soundCard}>
+                  <View style={styles.soundCardLeft}>
+                    <Text style={styles.soundCardIcon}>{soundEnabled ? "🔊" : "🔇"}</Text>
+                    <View>
+                      <Text style={styles.soundCardTitle}>Звуки</Text>
+                      <Text style={styles.soundCardSub}>{soundEnabled ? "Включены" : "Выключены"}</Text>
+                    </View>
+                  </View>
+                  <Tappable style={[styles.soundToggle, soundEnabled && styles.soundToggleOn]} onPress={() => toggleSound(!soundEnabled)} scaleTo={0.92}>
+                    <Text style={styles.soundToggleText}>{soundEnabled ? "ВКЛ" : "ВЫКЛ"}</Text>
+                  </Tappable>
+                </View>
+              </FadeSlide>
+              <SettingsScreen
+                key="settings"
               data={data}
               permissionDenied={permissionDenied}
               onToggleNotifications={setNotifications}
@@ -740,6 +872,7 @@ export default function App() {
                 )
               }
             />
+            </View>
           )}
         </ScrollView>
 
@@ -756,13 +889,25 @@ export default function App() {
         onDetail={setDetail}
         onMinutes={setMinutes}
         onReminder={setReminder}
-        onClose={() => setSheet(null)}
+        onClose={() => { setEditTaskId(null); setSheet(null); }}
         onSubmit={addTask}
+        isEditMode={!!editTaskId}
       />
 
       <CelebrationModal
         message={celebration}
         onClose={() => setCelebration(null)}
+      />
+      <NamePromptModal
+        visible={showNamePrompt}
+        nameInput={nameInput}
+        onChangeText={setNameInput}
+        onSubmit={async () => {
+          const name = nameInput.trim() || 'Ты';
+          await AsyncStorage.setItem('dayflow_name', name);
+          setUserName(name);
+          setShowNamePrompt(false);
+        }}
       />
     </LinearGradient>
   );
@@ -1053,6 +1198,7 @@ function AddSheet({
   onReminder,
   onClose,
   onSubmit,
+  isEditMode,
 }: {
   category: Category | null;
   title: string;
@@ -1065,6 +1211,7 @@ function AddSheet({
   onReminder: (value: string) => void;
   onClose: () => void;
   onSubmit: () => void;
+  isEditMode?: boolean;
 }) {
   const isLeisure = category === "leisure";
   const presets = isLeisure ? [15, 30, 60, 120] : [];
@@ -1151,7 +1298,7 @@ function AddSheet({
               end={{ x: 1, y: 0 }}
               style={styles.primary}
             >
-              <Text style={styles.primaryText}>Добавить в план</Text>
+              <Text style={styles.primaryText}>{isEditMode ? "Сохранить" : "Добавить в план"}</Text>
             </LinearGradient>
           </Tappable>
         </View>
@@ -1195,6 +1342,59 @@ function CelebrationModal({
             </Tappable>
           </LinearGradient>
         </PopIn>
+      </View>
+    </Modal>
+  );
+}
+
+
+function NamePromptModal({
+  visible,
+  nameInput,
+  onChangeText,
+  onSubmit,
+}: {
+  visible: boolean;
+  nameInput: string;
+  onChangeText: (text: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+    >
+      <View style={styles.nameModalOverlay}>
+        <KeyboardAvoidingView behavior="padding">
+          <View style={styles.nameModalCard}>
+            <Text style={styles.nameModalTitle}>👋 Как тебя зовут?</Text>
+            <Text style={styles.nameModalSub}>
+              DayFlow будет приветствовать тебя по имени
+            </Text>
+            <TextInput
+              value={nameInput}
+              onChangeText={onChangeText}
+              placeholder="Введи своё имя"
+              placeholderTextColor="#73758A"
+              style={styles.input}
+              returnKeyType="done"
+              onSubmitEditing={onSubmit}
+              autoFocus
+            />
+            <Tappable onPress={onSubmit} scaleTo={0.97}>
+              <LinearGradient
+                colors={gradient.accent}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.primary}
+              >
+                <Text style={styles.primaryText}>Начать</Text>
+              </LinearGradient>
+            </Tappable>
+          </View>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );
@@ -1463,7 +1663,6 @@ const styles = StyleSheet.create({
   },
   tabItem: {
     flex: 1,
-    minWidth: 88,
     height: 58,
     alignItems: "center",
     justifyContent: "center",
@@ -1576,4 +1775,48 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   celebrateButtonText: { color: "#FFFFFF", fontWeight: "900", fontSize: 15 },
+  soundCard: {
+    backgroundColor: colors.card, borderRadius: radius.lg, borderWidth: 1,
+    borderColor: colors.border, flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between", padding: space.lg, marginBottom: space.md,
+  },
+  soundCardLeft: { flexDirection: "row", alignItems: "center", gap: 14 },
+  soundCardIcon: { fontSize: 26 },
+  soundCardTitle: { color: colors.text, fontSize: 15, fontWeight: "800" },
+  soundCardSub: { color: colors.textDim, fontSize: 12, marginTop: 2 },
+  soundToggle: {
+    paddingHorizontal: 16, height: 36, borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1,
+    borderColor: colors.border, alignItems: "center", justifyContent: "center",
+  },
+  soundToggleOn: {
+    backgroundColor: "rgba(124, 58, 237, 0.22)",
+    borderColor: "rgba(167, 139, 250, 0.45)",
+  },
+  soundToggleText: { color: colors.violetSoft, fontSize: 12, fontWeight: "800" },
+  nameModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(7,9,18,0.88)",
+    justifyContent: "center",
+    padding: 24,
+  },
+  nameModalCard: {
+    backgroundColor: "#171A2C",
+    borderRadius: 24,
+    padding: 28,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  nameModalTitle: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  nameModalSub: {
+    color: colors.textDim,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 20,
+  },
 });
