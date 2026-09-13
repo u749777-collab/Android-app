@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
-import { Audio } from "expo-av";
+import { useAudioPlayer } from "expo-audio";
 import { StatusBar } from "expo-status-bar";
 import React, {
   useCallback,
@@ -142,8 +142,12 @@ export default function App() {
   const [nameInput, setNameInput] = useState("");
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const soundsRef = useRef<Record<string, Audio.Sound>>({});
   const soundEnabledRef = useRef(true);
+
+  // expo-audio: три плеера создаются один раз и живут весь жизненный цикл компонента.
+  const completePlayer = useAudioPlayer(require("./sound-complete.mp3"));
+  const celebratePlayer = useAudioPlayer(require("./sound-celebrate.mp3"));
+  const timerPlayer = useAudioPlayer(require("./sound-timer.mp3"));
 
   const completedFlags = useRef<Record<string, boolean>>({});
   const initialised = useRef(false);
@@ -161,7 +165,7 @@ export default function App() {
         loaded = defaultData();
       }
       const rolled = rollOverIfNewDay(loaded);
-      const storedName = await AsyncStorage.getItem('dayflow_name');
+      const storedName = await AsyncStorage.getItem("dayflow_name");
       if (!alive) return;
       setData(rolled);
       if (!storedName) {
@@ -284,7 +288,7 @@ export default function App() {
             ? "Весь план на сегодня выполнен!"
             : `Раздел «${categoryTitle[key as Category]}» выполнен!`;
         setCelebration(message);
-        void playSound("celebrate");
+        playSound("celebrate");
         if (data.notifications) {
           notifyNow(
             key === "all" ? "День завершён" : "Отличная работа!",
@@ -303,7 +307,7 @@ export default function App() {
 
   const toggleTask = useCallback((task: Task) => {
     if (task.category === "leisure") return;
-    if (!task.isCompleted) void playSound("complete");
+    if (!task.isCompleted) playSound("complete");
     gentleLayout();
     setData((prev) => ({
       ...prev,
@@ -376,7 +380,7 @@ export default function App() {
 
   const finishTimer = useCallback(async (task: Task) => {
     await cancel(task.timerId);
-    void playSound("timer");
+    playSound("timer");
     gentleLayout();
     setData((prev) => ({
       ...prev,
@@ -575,45 +579,49 @@ export default function App() {
     }));
   };
 
-  useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const stored = await AsyncStorage.getItem('dayflow_sound');
+        const stored = await AsyncStorage.getItem("dayflow_sound");
         if (!alive) return;
-        const enabled = stored !== 'false';
+        const enabled = stored !== "false";
         setSoundEnabled(enabled);
         soundEnabledRef.current = enabled;
-        const [c, cel, t] = await Promise.all([
-          Audio.Sound.createAsync(require('./sound-complete.mp3'), { shouldPlay: false, volume: 0.7 }),
-          Audio.Sound.createAsync(require('./sound-celebrate.mp3'), { shouldPlay: false, volume: 0.8 }),
-          Audio.Sound.createAsync(require('./sound-timer.mp3'), { shouldPlay: false, volume: 0.7 }),
-        ]);
-        if (!alive) return;
-        soundsRef.current = { complete: c.sound, celebrate: cel.sound, timer: t.sound };
       } catch {
         // sounds not critical
       }
     })();
     return () => {
       alive = false;
-      Object.values(soundsRef.current).forEach((s) => s.unloadAsync().catch(() => {}));
     };
   }, []);
 
-  const playSound = async (key: "complete" | "celebrate" | "timer") => {
+  const playSound = (key: "complete" | "celebrate" | "timer") => {
     if (!soundEnabledRef.current) return;
-    const sound = soundsRef.current[key];
-    if (!sound) return;
-    try { await sound.setPositionAsync(0); await sound.playAsync(); } catch {}
+    const player =
+      key === "complete"
+        ? completePlayer
+        : key === "celebrate"
+          ? celebratePlayer
+          : timerPlayer;
+    if (!player) return;
+    try {
+      player.seekTo(0);
+      player.play();
+    } catch {
+      // ignore
+    }
   };
 
   const toggleSound = async (value: boolean) => {
     setSoundEnabled(value);
     soundEnabledRef.current = value;
-    await AsyncStorage.setItem('dayflow_sound', value ? 'true' : 'false');
+    await AsyncStorage.setItem("dayflow_sound", value ? "true" : "false");
   };
 
   const resetAll = () => {
@@ -658,7 +666,7 @@ export default function App() {
                   <View style={styles.flexShrink}>
                     <Text style={styles.eyebrow}>ТВОЙ ДЕНЬ</Text>
                     <Text style={styles.heading}>
-                      {userName ? `Привет, ${userName}!` : 'Привет!'}
+                      {userName ? `Привет, ${userName}!` : "Привет!"}
                     </Text>
                     <Text style={styles.date}>
                       {new Date().toLocaleDateString("ru-RU", {
@@ -718,7 +726,9 @@ export default function App() {
               <FadeSlide delay={110}>
                 <View style={styles.sectionHead}>
                   <Text style={styles.sectionTitle}>План на сегодня</Text>
-                  <Text style={styles.sectionHint}>удержание — правка / удалить</Text>
+                  <Text style={styles.sectionHint}>
+                    удержание — правка / удалить
+                  </Text>
                 </View>
               </FadeSlide>
 
@@ -851,29 +861,43 @@ export default function App() {
               <FadeSlide>
                 <View style={styles.soundCard}>
                   <View style={styles.soundCardLeft}>
-                    <Text style={styles.soundCardIcon}>{soundEnabled ? "🔊" : "🔇"}</Text>
+                    <Text style={styles.soundCardIcon}>
+                      {soundEnabled ? "🔊" : "🔇"}
+                    </Text>
                     <View>
                       <Text style={styles.soundCardTitle}>Звуки</Text>
-                      <Text style={styles.soundCardSub}>{soundEnabled ? "Включены" : "Выключены"}</Text>
+                      <Text style={styles.soundCardSub}>
+                        {soundEnabled ? "Включены" : "Выключены"}
+                      </Text>
                     </View>
                   </View>
-                  <Tappable style={[styles.soundToggle, soundEnabled && styles.soundToggleOn]} onPress={() => toggleSound(!soundEnabled)} scaleTo={0.92}>
-                    <Text style={styles.soundToggleText}>{soundEnabled ? "ВКЛ" : "ВЫКЛ"}</Text>
+                  <Tappable
+                    style={[
+                      styles.soundToggle,
+                      soundEnabled && styles.soundToggleOn,
+                    ]}
+                    onPress={() => toggleSound(!soundEnabled)}
+                    scaleTo={0.92}
+                  >
+                    <Text style={styles.soundToggleText}>
+                      {soundEnabled ? "ВКЛ" : "ВЫКЛ"}
+                    </Text>
                   </Tappable>
                 </View>
               </FadeSlide>
               <SettingsScreen
                 key="settings"
-              data={data}
-              permissionDenied={permissionDenied}
-              onToggleNotifications={setNotifications}
-              onReset={resetAll}
-              onTestNotification={() =>
-                notifyNow("Проверка", "Уведомления от DayFlow работают.").catch(
-                  () => {},
-                )
-              }
-            />
+                data={data}
+                permissionDenied={permissionDenied}
+                onToggleNotifications={setNotifications}
+                onReset={resetAll}
+                onTestNotification={() =>
+                  notifyNow(
+                    "Проверка",
+                    "Уведомления от DayFlow работают.",
+                  ).catch(() => {})
+                }
+              />
             </View>
           )}
         </ScrollView>
@@ -891,7 +915,10 @@ export default function App() {
         onDetail={setDetail}
         onMinutes={setMinutes}
         onReminder={setReminder}
-        onClose={() => { setEditTaskId(null); setSheet(null); }}
+        onClose={() => {
+          setEditTaskId(null);
+          setSheet(null);
+        }}
         onSubmit={addTask}
         isEditMode={!!editTaskId}
       />
@@ -905,8 +932,8 @@ export default function App() {
         nameInput={nameInput}
         onChangeText={setNameInput}
         onSubmit={async () => {
-          const name = nameInput.trim() || 'Ты';
-          await AsyncStorage.setItem('dayflow_name', name);
+          const name = nameInput.trim() || "Ты";
+          await AsyncStorage.setItem("dayflow_name", name);
           setUserName(name);
           setShowNamePrompt(false);
         }}
@@ -1300,7 +1327,9 @@ function AddSheet({
               end={{ x: 1, y: 0 }}
               style={styles.primary}
             >
-              <Text style={styles.primaryText}>{isEditMode ? "Сохранить" : "Добавить в план"}</Text>
+              <Text style={styles.primaryText}>
+                {isEditMode ? "Сохранить" : "Добавить в план"}
+              </Text>
             </LinearGradient>
           </Tappable>
         </View>
@@ -1348,7 +1377,6 @@ function CelebrationModal({
     </Modal>
   );
 }
-
 
 function NamePromptModal({
   visible,
@@ -1778,18 +1806,29 @@ const styles = StyleSheet.create({
   },
   celebrateButtonText: { color: "#FFFFFF", fontWeight: "900", fontSize: 15 },
   soundCard: {
-    backgroundColor: colors.card, borderRadius: radius.lg, borderWidth: 1,
-    borderColor: colors.border, flexDirection: "row", alignItems: "center",
-    justifyContent: "space-between", padding: space.lg, marginBottom: space.md,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: space.lg,
+    marginBottom: space.md,
   },
   soundCardLeft: { flexDirection: "row", alignItems: "center", gap: 14 },
   soundCardIcon: { fontSize: 26 },
   soundCardTitle: { color: colors.text, fontSize: 15, fontWeight: "800" },
   soundCardSub: { color: colors.textDim, fontSize: 12, marginTop: 2 },
   soundToggle: {
-    paddingHorizontal: 16, height: 36, borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1,
-    borderColor: colors.border, alignItems: "center", justifyContent: "center",
+    paddingHorizontal: 16,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
   },
   soundToggleOn: {
     backgroundColor: "rgba(124, 58, 237, 0.22)",
