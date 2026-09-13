@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
-import { useAudioPlayer } from "expo-audio";
+import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { StatusBar } from "expo-status-bar";
 import React, {
   useCallback,
@@ -144,10 +144,15 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const soundEnabledRef = useRef(true);
 
-  // expo-audio: три плеера создаются один раз и живут весь жизненный цикл компонента.
-  const completePlayer = useAudioPlayer(require("./sound-complete.mp3"));
-  const celebratePlayer = useAudioPlayer(require("./sound-celebrate.mp3"));
-  const timerPlayer = useAudioPlayer(require("./sound-timer.mp3"));
+  // expo-audio: три фоновых трека играют по кругу 1 → 2 → 3 → 1 …
+  const bgPlayer1 = useAudioPlayer(require("./sound-timer.mp3"));
+  const bgPlayer2 = useAudioPlayer(require("./sound-timer2.mp3"));
+  const bgPlayer3 = useAudioPlayer(require("./sound-timer3.mp3"));
+  const bgPlayers = [bgPlayer1, bgPlayer2, bgPlayer3];
+
+  const [bgIndex, setBgIndex] = useState(0);
+  const bgStatus = useAudioPlayerStatus(bgPlayers[bgIndex]);
+  const lastPlayedIndexRef = useRef(-1);
 
   const completedFlags = useRef<Record<string, boolean>>({});
   const initialised = useRef(false);
@@ -601,22 +606,46 @@ export default function App() {
     };
   }, []);
 
-  const playSound = (key: "complete" | "celebrate" | "timer") => {
-    if (!soundEnabledRef.current) return;
-    const player =
-      key === "complete"
-        ? completePlayer
-        : key === "celebrate"
-          ? celebratePlayer
-          : timerPlayer;
-    if (!player) return;
-    try {
-      player.seekTo(0);
-      player.play();
-    } catch {
-      // ignore
+  // Переключаем трек, когда текущий доиграл до конца.
+  useEffect(() => {
+    if (bgStatus?.didJustFinish) {
+      setBgIndex((i) => (i + 1) % bgPlayers.length);
     }
-  };
+  }, [bgStatus?.didJustFinish, bgPlayers.length]);
+
+  // Запуск/пауза фоновой музыки в зависимости от готовности и настройки звука.
+  useEffect(() => {
+    if (!ready) return;
+
+    if (soundEnabled) {
+      bgPlayers.forEach((p, i) => {
+        if (i !== bgIndex) {
+          try {
+            p.pause();
+          } catch {}
+        }
+      });
+      const current = bgPlayers[bgIndex];
+      if (!current) return;
+      try {
+        current.volume = 0.35;
+        if (lastPlayedIndexRef.current !== bgIndex) {
+          current.seekTo(0);
+          lastPlayedIndexRef.current = bgIndex;
+        }
+        current.play();
+      } catch {}
+    } else {
+      bgPlayers.forEach((p) => {
+        try {
+          p.pause();
+        } catch {}
+      });
+    }
+  }, [ready, soundEnabled, bgIndex, bgPlayers]);
+
+  // Сигнальные звуки отключены — играет только фоновая музыка.
+  const playSound = (_key: "complete" | "celebrate" | "timer") => {};
 
   const toggleSound = async (value: boolean) => {
     setSoundEnabled(value);
@@ -865,9 +894,9 @@ export default function App() {
                       {soundEnabled ? "🔊" : "🔇"}
                     </Text>
                     <View>
-                      <Text style={styles.soundCardTitle}>Звуки</Text>
+                      <Text style={styles.soundCardTitle}>Музыка</Text>
                       <Text style={styles.soundCardSub}>
-                        {soundEnabled ? "Включены" : "Выключены"}
+                        {soundEnabled ? "Включена" : "Выключена"}
                       </Text>
                     </View>
                   </View>
