@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
+import * as Haptics from "expo-haptics";
 import { StatusBar } from "expo-status-bar";
 import React, {
   useCallback,
@@ -18,7 +19,6 @@ import {
   LayoutAnimation,
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StatusBar as RNStatusBar,
   StyleSheet,
@@ -27,6 +27,10 @@ import {
   UIManager,
   View,
 } from "react-native";
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 import {
   CATEGORIES,
@@ -45,6 +49,7 @@ import {
   AnimatedCheck,
   Confetti,
   FadeSlide,
+  GlossyIconBadge,
   PopIn,
   ProgressBar,
   PulseDot,
@@ -76,10 +81,41 @@ if (UIManager.setLayoutAnimationEnabledExperimental) {
 
 const STATUS_BAR_HEIGHT = RNStatusBar.currentHeight ?? 24;
 
+/** Безопасный тактильный отклик — не падает, если модуль недоступен. */
+const haptic = (style: "light" | "medium" | "success" = "light") => {
+  try {
+    if (style === "success") {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else if (style === "medium") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  } catch {
+    // haptics not critical
+  }
+};
+
+/** Плавный переход между вкладками: fade + небольшой сдвиг вверх. */
+function useTabTransition(current: Tab) {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    anim.setValue(0);
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [current, anim]);
+  return anim;
+}
+
 const meta: Record<
   Category,
   {
     icon: string;
+    image?: any;
     color: string;
     subtitle: string;
     gradient: readonly [string, string];
@@ -87,18 +123,21 @@ const meta: Record<
 > = {
   sport: {
     icon: "⚡",
+    // image: require("./assets/icons/sport-3d.png"), // раскомментируйте после добавления файла
     color: colors.violetSoft,
     subtitle: "Сила и здоровье",
     gradient: gradient.sport,
   },
   study: {
     icon: "📚",
+    // image: require("./assets/icons/study-3d.png"),
     color: colors.blueSoft,
     subtitle: "Знания и развитие",
     gradient: gradient.study,
   },
   leisure: {
     icon: "◷",
+    // image: require("./assets/icons/leisure-3d.png"),
     color: colors.cyan,
     subtitle: "Отдых под контролем",
     gradient: gradient.leisure,
@@ -125,7 +164,8 @@ const gentleLayout = () =>
     },
   });
 
-export default function App() {
+function DayFlowApp() {
+  const insets = useSafeAreaInsets();
   const [data, setData] = useState<AppData>(() => defaultData());
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState<Tab>("today");
@@ -144,11 +184,21 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const soundEnabledRef = useRef(true);
 
+  const tabAnim = useTabTransition(tab);
+
   // expo-audio: три фоновых трека играют по кругу 1 → 2 → 3 → 1 …
   const bgPlayer1 = useAudioPlayer(require("./sound-timer.mp3"));
   const bgPlayer2 = useAudioPlayer(require("./sound-timer2.mp3"));
   const bgPlayer3 = useAudioPlayer(require("./sound-timer3.mp3"));
-  const bgPlayers = [bgPlayer1, bgPlayer2, bgPlayer3];
+
+  // FIX: раньше этот массив пересоздавался на каждый рендер (в т.ч. каждую
+  // секунду из-за тикера `now`), из-за чего ниже стоящий эффект с зависимостью
+  // от bgPlayers срабатывал ежесекундно и дёргал .play() заново — музыка
+  // заикалась/перезапускалась. useMemo фиксирует ссылку на массив.
+  const bgPlayers = useMemo(
+    () => [bgPlayer1, bgPlayer2, bgPlayer3],
+    [bgPlayer1, bgPlayer2, bgPlayer3],
+  );
 
   const [bgIndex, setBgIndex] = useState(0);
   const bgStatus = useAudioPlayerStatus(bgPlayers[bgIndex]);
@@ -293,6 +343,7 @@ export default function App() {
             ? "Весь план на сегодня выполнен!"
             : `Раздел «${categoryTitle[key as Category]}» выполнен!`;
         setCelebration(message);
+        haptic("success");
         playSound("celebrate");
         if (data.notifications) {
           notifyNow(
@@ -312,7 +363,10 @@ export default function App() {
 
   const toggleTask = useCallback((task: Task) => {
     if (task.category === "leisure") return;
-    if (!task.isCompleted) playSound("complete");
+    if (!task.isCompleted) {
+      playSound("complete");
+      haptic("light");
+    }
     gentleLayout();
     setData((prev) => ({
       ...prev,
@@ -335,6 +389,8 @@ export default function App() {
         );
         return;
       }
+
+      haptic("light");
 
       if (task.isRunning) {
         await cancel(task.timerId);
@@ -386,6 +442,7 @@ export default function App() {
   const finishTimer = useCallback(async (task: Task) => {
     await cancel(task.timerId);
     playSound("timer");
+    haptic("medium");
     gentleLayout();
     setData((prev) => ({
       ...prev,
@@ -406,6 +463,7 @@ export default function App() {
 
   const resetTimer = useCallback(async (task: Task) => {
     await cancel(task.timerId);
+    haptic("light");
     gentleLayout();
     setData((prev) => ({
       ...prev,
@@ -425,6 +483,7 @@ export default function App() {
   }, []);
 
   const openSheet = (category: Category) => {
+    haptic("light");
     setEditTaskId(null);
     setSheet(category);
     setTitle("");
@@ -442,7 +501,55 @@ export default function App() {
     }
 
     if (editTaskId) {
+      const existing = data.tasks.find((item) => item.id === editTaskId);
+      if (!existing) {
+        setEditTaskId(null);
+        setSheet(null);
+        return;
+      }
+
+      // FIX: раньше при редактировании не было валидации (можно было сохранить
+      // некорректное время/лимит) — теперь проверяем так же, как при создании.
+      if (existing.category === "leisure") {
+        const value = Number(minutes.replace(",", "."));
+        if (!Number.isFinite(value) || value <= 0 || value > 24 * 60) {
+          Alert.alert("Проверь лимит", "Укажи время в минутах от 1 до 1440.");
+          return;
+        }
+      } else if (!parseTime(reminder)) {
+        Alert.alert(
+          "Проверь время",
+          "Формат напоминания: ЧЧ:ММ, например 07:30.",
+        );
+        return;
+      }
+
       const duration = Math.round(Number(minutes.replace(",", ".")) * 60);
+      let reminderId = existing.reminderId;
+      const nextReminderTime = reminder.trim();
+
+      // FIX: раньше при изменении времени напоминания старое уведомление
+      // оставалось запланированным на старое время, а новое не создавалось.
+      if (
+        existing.category !== "leisure" &&
+        nextReminderTime !== existing.reminderTime
+      ) {
+        await cancel(existing.reminderId);
+        reminderId = undefined;
+        if (data.notifications) {
+          try {
+            reminderId = await scheduleReminder({
+              ...existing,
+              title: name,
+              reminderTime: nextReminderTime,
+            });
+          } catch {
+            reminderId = undefined;
+          }
+        }
+      }
+
+      haptic("medium");
       gentleLayout();
       setData((prev) => ({
         ...prev,
@@ -463,7 +570,7 @@ export default function App() {
                         ? item.remainingSeconds
                         : duration,
                     }
-                  : { reminderTime: reminder.trim() }),
+                  : { reminderTime: nextReminderTime, reminderId }),
               }
             : item,
         ),
@@ -514,6 +621,7 @@ export default function App() {
       }
     }
 
+    haptic("medium");
     gentleLayout();
     setData((prev) => ({ ...prev, tasks: [...prev.tasks, task] }));
     setSheet(null);
@@ -528,6 +636,7 @@ export default function App() {
         onPress: async () => {
           await cancel(task.reminderId);
           await cancel(task.timerId);
+          haptic("medium");
           gentleLayout();
           setData((prev) => ({
             ...prev,
@@ -613,41 +722,50 @@ export default function App() {
     }
   }, [bgStatus?.didJustFinish, bgPlayers.length]);
 
-  // Запуск/пауза фоновой музыки в зависимости от готовности и настройки звука.
+  // FIX: музыка. Раньше этот эффект пересоздавался каждую секунду из-за
+  // нестабильного bgPlayers и дёргал .play() заново — звук заикался.
+  // Теперь bgPlayers стабилен (useMemo), а play() вызывается только если
+  // трек реально не играет (по bgStatus.playing).
   useEffect(() => {
     if (!ready) return;
 
-    if (soundEnabled) {
-      bgPlayers.forEach((p, i) => {
-        if (i !== bgIndex) {
-          try {
-            p.pause();
-          } catch {}
-        }
-      });
-      const current = bgPlayers[bgIndex];
-      if (!current) return;
-      try {
-        current.volume = 0.35;
-        if (lastPlayedIndexRef.current !== bgIndex) {
-          current.seekTo(0);
-          lastPlayedIndexRef.current = bgIndex;
-        }
-        current.play();
-      } catch {}
-    } else {
+    if (!soundEnabled) {
       bgPlayers.forEach((p) => {
         try {
           p.pause();
         } catch {}
       });
+      return;
     }
-  }, [ready, soundEnabled, bgIndex, bgPlayers]);
+
+    bgPlayers.forEach((p, i) => {
+      if (i !== bgIndex) {
+        try {
+          p.pause();
+        } catch {}
+      }
+    });
+
+    const current = bgPlayers[bgIndex];
+    if (!current) return;
+
+    try {
+      current.volume = 0.35;
+      if (lastPlayedIndexRef.current !== bgIndex) {
+        current.seekTo(0);
+        lastPlayedIndexRef.current = bgIndex;
+      }
+      if (!bgStatus?.playing) {
+        current.play();
+      }
+    } catch {}
+  }, [ready, soundEnabled, bgIndex, bgPlayers, bgStatus?.playing]);
 
   // Сигнальные звуки отключены — играет только фоновая музыка.
   const playSound = (_key: "complete" | "celebrate" | "timer") => {};
 
   const toggleSound = async (value: boolean) => {
+    haptic("light");
     setSoundEnabled(value);
     soundEnabledRef.current = value;
     await AsyncStorage.setItem("dayflow_sound", value ? "true" : "false");
@@ -662,277 +780,313 @@ export default function App() {
         onPress: async () => {
           await cancelAll();
           initialised.current = false;
+          haptic("medium");
           gentleLayout();
-          setData({
+          // FIX: раньше объект данных собирался вручную и мог разойтись
+          // со схемой AppData — теперь берём базовую форму из defaultData().
+          setData((prev) => ({
+            ...defaultData(),
             date: todayKey(),
-            tasks: [],
-            history: [],
-            notifications: data.notifications,
-          });
+            notifications: prev.notifications,
+          }));
         },
       },
     ]);
   };
 
+  const changeTab = useCallback(
+    (next: Tab) => {
+      if (next === tab) return;
+      haptic("light");
+      setTab(next);
+    },
+    [tab],
+  );
+
   /* ------------------------------------------------------------------- view */
 
   if (!ready) return <SplashScreen />;
+
+  const topPad = Math.max(insets.top, STATUS_BAR_HEIGHT) + 16;
+  const bottomPad = 130 + insets.bottom;
 
   return (
     <LinearGradient colors={gradient.screen} style={styles.flex}>
       <StatusBar style="light" />
       <AmbientGlow />
-      <SafeAreaView style={styles.flex}>
+      <View style={styles.flex}>
         <ScrollView
-          contentContainerStyle={styles.screen}
+          contentContainerStyle={[
+            styles.screen,
+            { paddingTop: topPad, paddingBottom: bottomPad },
+          ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {tab === "today" && (
-            <View key="today">
-              <FadeSlide>
-                <View style={styles.header}>
-                  <View style={styles.flexShrink}>
-                    <Text style={styles.eyebrow}>ТВОЙ ДЕНЬ</Text>
-                    <Text style={styles.heading}>
-                      {userName ? `Привет, ${userName}!` : "Привет!"}
-                    </Text>
-                    <Text style={styles.date}>
-                      {new Date().toLocaleDateString("ru-RU", {
-                        weekday: "long",
-                        day: "numeric",
-                        month: "long",
-                      })}
-                    </Text>
-                  </View>
-                  <View style={styles.avatar}>
-                    <Spin duration={14000}>
-                      <Text style={styles.avatarText}>✦</Text>
-                    </Spin>
-                  </View>
-                </View>
-              </FadeSlide>
-
-              <FadeSlide delay={60}>
-                <LinearGradient
-                  colors={gradient.accent}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.hero}
-                >
-                  <View style={styles.heroTop}>
-                    <View>
-                      <Text style={styles.heroLabel}>ПРОГРЕСС ДНЯ</Text>
-                      <Text style={styles.heroValue}>{animatedPercent}%</Text>
-                    </View>
-                    <View style={styles.heroBadge}>
-                      <Text style={styles.heroBadgeText}>
-                        {completed}/{total}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.heroBar}>
-                    <ProgressBar value={progress} />
-                  </View>
-                  <View style={styles.heroChips}>
-                    {sections.map((section) => (
-                      <View key={section.category} style={styles.chip}>
-                        <Text style={styles.chipText}>
-                          {meta[section.category].icon} {section.done}/
-                          {section.tasks.length}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                  <Text style={styles.heroCopy}>
-                    {progress === 100 && total > 0
-                      ? "Идеальный день — всё выполнено!"
-                      : "Каждый зачёркнутый пункт делает день лучше."}
-                  </Text>
-                </LinearGradient>
-              </FadeSlide>
-
-              <FadeSlide delay={110}>
-                <View style={styles.sectionHead}>
-                  <Text style={styles.sectionTitle}>План на сегодня</Text>
-                  <Text style={styles.sectionHint}>
-                    удержание — правка / удалить
-                  </Text>
-                </View>
-              </FadeSlide>
-
-              {sections.map((section, index) => (
-                <FadeSlide
-                  key={section.category}
-                  delay={150 + index * 70}
-                  style={styles.cardWrap}
-                >
-                  <View style={styles.card}>
-                    <View style={styles.cardHead}>
-                      <LinearGradient
-                        colors={meta[section.category].gradient}
-                        style={styles.iconBox}
-                      >
-                        <Text style={styles.iconText}>
-                          {meta[section.category].icon}
-                        </Text>
-                      </LinearGradient>
-                      <View style={styles.cardInfo}>
-                        <Text style={styles.cardTitle}>
-                          {categoryTitle[section.category]}
-                        </Text>
-                        <Text style={styles.cardSubtitle}>
-                          {section.done} из {section.tasks.length} ·{" "}
-                          {meta[section.category].subtitle}
-                        </Text>
-                      </View>
-                      <Tappable
-                        accessibilityLabel={`Добавить в ${categoryTitle[section.category]}`}
-                        style={styles.addButton}
-                        onPress={() => openSheet(section.category)}
-                        scaleTo={0.88}
-                      >
-                        <Text style={styles.addText}>＋</Text>
-                      </Tappable>
-                    </View>
-
-                    <View style={styles.cardProgress}>
-                      <ProgressBar
-                        value={section.percent}
-                        color={meta[section.category].color}
-                        track={colors.border}
-                        height={5}
-                      />
-                    </View>
-
-                    {section.tasks.length === 0 ? (
-                      <Text style={styles.empty}>
-                        Пока пусто — добавь первое занятие.
-                      </Text>
-                    ) : (
-                      section.tasks.map((task) =>
-                        section.category === "leisure" ? (
-                          <LeisureRow
-                            key={task.id}
-                            task={task}
-                            now={now}
-                            onToggle={() => toggleTimer(task)}
-                            onFinish={() => finishTimer(task)}
-                            onReset={() => resetTimer(task)}
-                            onLongPress={() => taskOptions(task)}
-                          />
-                        ) : (
-                          <TaskRow
-                            key={task.id}
-                            task={task}
-                            color={meta[section.category].color}
-                            onPress={() => toggleTask(task)}
-                            onLongPress={() => taskOptions(task)}
-                          />
-                        ),
-                      )
-                    )}
-                  </View>
-                </FadeSlide>
-              ))}
-
-              {total > 0 && progress < 100 && (
-                <FadeSlide delay={400}>
-                  <Tappable
-                    style={styles.motivation}
-                    onPress={() => {
-                      const text = randomMotivation();
-                      if (data.notifications) {
-                        notifyNow("Ты справишься!", text).catch(() => {});
-                      }
-                      Alert.alert("DayFlow", text);
-                    }}
-                  >
-                    <Spin duration={11000}>
-                      <Text style={styles.motivationIcon}>✦</Text>
-                    </Spin>
+          <Animated.View
+            style={{
+              opacity: tabAnim,
+              transform: [
+                {
+                  translateY: tabAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [12, 0],
+                  }),
+                },
+              ],
+            }}
+          >
+            {tab === "today" && (
+              <View key="today">
+                <FadeSlide>
+                  <View style={styles.header}>
                     <View style={styles.flexShrink}>
-                      <Text style={styles.motivationTitle}>Нужен импульс?</Text>
-                      <Text style={styles.motivationCopy}>
-                        Нажми — DayFlow пришлёт мотивацию
+                      <Text style={styles.eyebrow}>ТВОЙ ДЕНЬ</Text>
+                      <Text style={styles.heading}>
+                        {userName ? `Привет, ${userName}!` : "Привет!"}
+                      </Text>
+                      <Text style={styles.date}>
+                        {new Date().toLocaleDateString("ru-RU", {
+                          weekday: "long",
+                          day: "numeric",
+                          month: "long",
+                        })}
                       </Text>
                     </View>
-                  </Tappable>
-                </FadeSlide>
-              )}
-
-              {total === 0 && (
-                <FadeSlide delay={220}>
-                  <View style={styles.emptyDay}>
-                    <Text style={styles.emptyDayIcon}>◌</Text>
-                    <Text style={styles.emptyDayTitle}>План пуст</Text>
-                    <Text style={styles.emptyDayCopy}>
-                      Добавь упражнение, учебную задачу или лимит отдыха, чтобы
-                      начать день.
-                    </Text>
+                    <Spin duration={14000}>
+                      <GlossyIconBadge
+                        emoji="✦"
+                        gradientColors={["#7C3AED", "#A78BFA"]}
+                        size={52}
+                      />
+                    </Spin>
                   </View>
                 </FadeSlide>
-              )}
-            </View>
-          )}
 
-          {tab === "stats" && (
-            <StatsScreen
-              key="stats"
-              data={data}
-              progress={progress}
-              leisureUsed={leisureUsed}
-            />
-          )}
-
-          {tab === "settings" && (
-            <View key="settings">
-              <FadeSlide>
-                <View style={styles.soundCard}>
-                  <View style={styles.soundCardLeft}>
-                    <Text style={styles.soundCardIcon}>
-                      {soundEnabled ? "🔊" : "🔇"}
-                    </Text>
-                    <View>
-                      <Text style={styles.soundCardTitle}>Музыка</Text>
-                      <Text style={styles.soundCardSub}>
-                        {soundEnabled ? "Включена" : "Выключена"}
-                      </Text>
-                    </View>
-                  </View>
-                  <Tappable
-                    style={[
-                      styles.soundToggle,
-                      soundEnabled && styles.soundToggleOn,
-                    ]}
-                    onPress={() => toggleSound(!soundEnabled)}
-                    scaleTo={0.92}
+                <FadeSlide delay={60}>
+                  <LinearGradient
+                    colors={gradient.accent}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.hero}
                   >
-                    <Text style={styles.soundToggleText}>
-                      {soundEnabled ? "ВКЛ" : "ВЫКЛ"}
+                    <View style={styles.heroShine} pointerEvents="none" />
+                    <View style={styles.heroTop}>
+                      <View>
+                        <Text style={styles.heroLabel}>ПРОГРЕСС ДНЯ</Text>
+                        <Text style={styles.heroValue}>{animatedPercent}%</Text>
+                      </View>
+                      <View style={styles.heroBadge}>
+                        <Text style={styles.heroBadgeText}>
+                          {completed}/{total}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.heroBar}>
+                      <ProgressBar value={progress} />
+                    </View>
+                    <View style={styles.heroChips}>
+                      {sections.map((section) => (
+                        <View key={section.category} style={styles.chip}>
+                          <Text style={styles.chipText}>
+                            {meta[section.category].icon} {section.done}/
+                            {section.tasks.length}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                    <Text style={styles.heroCopy}>
+                      {progress === 100 && total > 0
+                        ? "Идеальный день — всё выполнено!"
+                        : "Каждый зачёркнутый пункт делает день лучше."}
                     </Text>
-                  </Tappable>
-                </View>
-              </FadeSlide>
-              <SettingsScreen
-                key="settings"
+                  </LinearGradient>
+                </FadeSlide>
+
+                <FadeSlide delay={110}>
+                  <View style={styles.sectionHead}>
+                    <Text style={styles.sectionTitle}>План на сегодня</Text>
+                    <Text style={styles.sectionHint}>
+                      удержание — правка / удалить
+                    </Text>
+                  </View>
+                </FadeSlide>
+
+                {sections.map((section, index) => (
+                  <FadeSlide
+                    key={section.category}
+                    delay={150 + index * 70}
+                    style={styles.cardWrap}
+                  >
+                    <View style={styles.card}>
+                      <View style={styles.cardHead}>
+                        <GlossyIconBadge
+                          emoji={meta[section.category].icon}
+                          image={meta[section.category].image}
+                          gradientColors={meta[section.category].gradient}
+                          size={46}
+                        />
+                        <View style={styles.cardInfo}>
+                          <Text style={styles.cardTitle}>
+                            {categoryTitle[section.category]}
+                          </Text>
+                          <Text style={styles.cardSubtitle}>
+                            {section.done} из {section.tasks.length} ·{" "}
+                            {meta[section.category].subtitle}
+                          </Text>
+                        </View>
+                        <Tappable
+                          accessibilityLabel={`Добавить в ${categoryTitle[section.category]}`}
+                          style={styles.addButton}
+                          onPress={() => openSheet(section.category)}
+                          scaleTo={0.88}
+                        >
+                          <Text style={styles.addText}>＋</Text>
+                        </Tappable>
+                      </View>
+
+                      <View style={styles.cardProgress}>
+                        <ProgressBar
+                          value={section.percent}
+                          color={meta[section.category].color}
+                          track={colors.border}
+                          height={5}
+                        />
+                      </View>
+
+                      {section.tasks.length === 0 ? (
+                        <Text style={styles.empty}>
+                          Пока пусто — добавь первое занятие.
+                        </Text>
+                      ) : (
+                        section.tasks.map((task) =>
+                          section.category === "leisure" ? (
+                            <LeisureRow
+                              key={task.id}
+                              task={task}
+                              now={now}
+                              onToggle={() => toggleTimer(task)}
+                              onFinish={() => finishTimer(task)}
+                              onReset={() => resetTimer(task)}
+                              onLongPress={() => taskOptions(task)}
+                            />
+                          ) : (
+                            <TaskRow
+                              key={task.id}
+                              task={task}
+                              color={meta[section.category].color}
+                              onPress={() => toggleTask(task)}
+                              onLongPress={() => taskOptions(task)}
+                            />
+                          ),
+                        )
+                      )}
+                    </View>
+                  </FadeSlide>
+                ))}
+
+                {total > 0 && progress < 100 && (
+                  <FadeSlide delay={400}>
+                    <Tappable
+                      style={styles.motivation}
+                      onPress={() => {
+                        const text = randomMotivation();
+                        if (data.notifications) {
+                          notifyNow("Ты справишься!", text).catch(() => {});
+                        }
+                        Alert.alert("DayFlow", text);
+                      }}
+                    >
+                      <Spin duration={11000}>
+                        <GlossyIconBadge
+                          emoji="✦"
+                          gradientColors={["#7C3AED", "#A78BFA"]}
+                          size={40}
+                        />
+                      </Spin>
+                      <View style={styles.flexShrink}>
+                        <Text style={styles.motivationTitle}>Нужен импульс?</Text>
+                        <Text style={styles.motivationCopy}>
+                          Нажми — DayFlow пришлёт мотивацию
+                        </Text>
+                      </View>
+                    </Tappable>
+                  </FadeSlide>
+                )}
+
+                {total === 0 && (
+                  <FadeSlide delay={220}>
+                    <View style={styles.emptyDay}>
+                      <Text style={styles.emptyDayIcon}>◌</Text>
+                      <Text style={styles.emptyDayTitle}>План пуст</Text>
+                      <Text style={styles.emptyDayCopy}>
+                        Добавь упражнение, учебную задачу или лимит отдыха,
+                        чтобы начать день.
+                      </Text>
+                    </View>
+                  </FadeSlide>
+                )}
+              </View>
+            )}
+
+            {tab === "stats" && (
+              <StatsScreen
+                key="stats"
                 data={data}
-                permissionDenied={permissionDenied}
-                onToggleNotifications={setNotifications}
-                onReset={resetAll}
-                onTestNotification={() =>
-                  notifyNow(
-                    "Проверка",
-                    "Уведомления от DayFlow работают.",
-                  ).catch(() => {})
-                }
+                progress={progress}
+                leisureUsed={leisureUsed}
               />
-            </View>
-          )}
+            )}
+
+            {tab === "settings" && (
+              <View key="settings">
+                <FadeSlide>
+                  <View style={styles.soundCard}>
+                    <View style={styles.soundCardLeft}>
+                      <Text style={styles.soundCardIcon}>
+                        {soundEnabled ? "🔊" : "🔇"}
+                      </Text>
+                      <View>
+                        <Text style={styles.soundCardTitle}>Музыка</Text>
+                        <Text style={styles.soundCardSub}>
+                          {soundEnabled ? "Включена" : "Выключена"}
+                        </Text>
+                      </View>
+                    </View>
+                    <Tappable
+                      style={[
+                        styles.soundToggle,
+                        soundEnabled && styles.soundToggleOn,
+                      ]}
+                      onPress={() => toggleSound(!soundEnabled)}
+                      scaleTo={0.92}
+                    >
+                      <Text style={styles.soundToggleText}>
+                        {soundEnabled ? "ВКЛ" : "ВЫКЛ"}
+                      </Text>
+                    </Tappable>
+                  </View>
+                </FadeSlide>
+                <SettingsScreen
+                  key="settings"
+                  data={data}
+                  permissionDenied={permissionDenied}
+                  onToggleNotifications={setNotifications}
+                  onReset={resetAll}
+                  onTestNotification={() =>
+                    notifyNow(
+                      "Проверка",
+                      "Уведомления от DayFlow работают.",
+                    ).catch(() => {})
+                  }
+                />
+              </View>
+            )}
+          </Animated.View>
         </ScrollView>
 
-        <TabBar active={tab} onChange={setTab} />
-      </SafeAreaView>
+        <TabBar active={tab} onChange={changeTab} bottomInset={insets.bottom} />
+      </View>
 
       <AddSheet
         category={sheet}
@@ -968,6 +1122,14 @@ export default function App() {
         }}
       />
     </LinearGradient>
+  );
+}
+
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <DayFlowApp />
+    </SafeAreaProvider>
   );
 }
 
@@ -1151,7 +1313,7 @@ function LeisureRow({
               <Text style={styles.playText}>{task.isRunning ? "‖" : "▶"}</Text>
             </Tappable>
             <Tappable
-              style={styles.smallGhost}
+              style={styles.smallGhostFinish}
               onPress={onFinish}
               scaleTo={0.9}
               accessibilityLabel="Завершить"
@@ -1176,9 +1338,11 @@ function LeisureRow({
 function TabBar({
   active,
   onChange,
+  bottomInset = 0,
 }: {
   active: Tab;
   onChange: (tab: Tab) => void;
+  bottomInset?: number;
 }) {
   const [width, setWidth] = useState(0);
   const anim = useRef(new Animated.Value(0)).current;
@@ -1198,7 +1362,7 @@ function TabBar({
 
   return (
     <View
-      style={styles.tabBar}
+      style={[styles.tabBar, { bottom: 14 + bottomInset }]}
       onLayout={(event) => setWidth(event.nativeEvent.layout.width - 16)}
     >
       {width > 0 && (
@@ -1394,7 +1558,11 @@ function CelebrationModal({
             <Spin duration={7000}>
               <Text style={styles.celebrateSpark}>✦</Text>
             </Spin>
-            <Text style={styles.celebrateEmoji}>🏆</Text>
+            <GlossyIconBadge
+              emoji="🏆"
+              gradientColors={["#F59E0B", "#FDE68A"]}
+              size={84}
+            />
             <Text style={styles.celebrateTitle}>Отличная работа!</Text>
             <Text style={styles.celebrateCopy}>{message}</Text>
             <Tappable style={styles.celebrateButton} onPress={onClose}>
@@ -1516,21 +1684,20 @@ const styles = StyleSheet.create({
     marginTop: 5,
     textTransform: "capitalize",
   },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.md,
-    backgroundColor: "rgba(124, 58, 237, 0.18)",
-    borderWidth: 1,
-    borderColor: "rgba(167, 139, 250, 0.45)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarText: { color: colors.violetSoft, fontSize: 20, fontWeight: "800" },
   hero: {
     borderRadius: radius.xl,
     padding: space.xl,
     marginBottom: space.xl,
+    overflow: "hidden",
+  },
+  heroShine: {
+    position: "absolute",
+    top: -60,
+    right: -40,
+    width: 180,
+    height: 180,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.12)",
   },
   heroTop: {
     flexDirection: "row",
@@ -1595,14 +1762,6 @@ const styles = StyleSheet.create({
     padding: space.lg,
   },
   cardHead: { flexDirection: "row", alignItems: "center" },
-  iconBox: {
-    width: 46,
-    height: 46,
-    borderRadius: radius.sm,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  iconText: { fontSize: 21, color: "#FFFFFF", fontWeight: "800" },
   cardInfo: { flex: 1, marginLeft: space.md },
   cardTitle: { color: colors.text, fontSize: 17, fontWeight: "800" },
   cardSubtitle: { color: colors.textDim, fontSize: 12, marginTop: 3 },
@@ -1647,9 +1806,16 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: radius.sm,
-    backgroundColor: "rgba(34, 211, 238, 0.16)",
+    backgroundColor: "rgba(34, 211, 238, 0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(34, 211, 238, 0.4)",
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: colors.cyan,
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
   },
   playText: { color: colors.cyan, fontSize: 15, fontWeight: "900" },
   smallGhost: {
@@ -1659,6 +1825,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  smallGhostFinish: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(34, 197, 94, 0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(34, 197, 94, 0.4)",
   },
   smallGhostText: { color: colors.textDim, fontSize: 17, fontWeight: "800" },
   finishText: { color: colors.green, fontSize: 17, fontWeight: "900" },
@@ -1671,8 +1847,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: space.lg,
     marginTop: space.xs,
+    gap: 14,
   },
-  motivationIcon: { fontSize: 22, color: colors.violetSoft, marginRight: 14 },
   motivationTitle: { color: colors.text, fontWeight: "800", fontSize: 15 },
   motivationCopy: { color: colors.textDim, fontSize: 12, marginTop: 3 },
   emptyDay: {
@@ -1810,7 +1986,6 @@ const styles = StyleSheet.create({
   celebrateCard: { width: "100%", borderRadius: 28, overflow: "hidden" },
   celebrateInner: { padding: space.xl, alignItems: "center" },
   celebrateSpark: { color: "#FFFFFF", fontSize: 26, opacity: 0.9 },
-  celebrateEmoji: { fontSize: 58, marginTop: space.md },
   celebrateTitle: {
     color: "#FFFFFF",
     fontSize: 25,
