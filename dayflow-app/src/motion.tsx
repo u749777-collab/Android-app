@@ -1,3 +1,5 @@
+import { LinearGradient } from "expo-linear-gradient";
+import { Image as ExpoImage } from "expo-image";
 import React, { useEffect, useRef, useState } from "react";
 import {
   AccessibilityInfo,
@@ -5,6 +7,7 @@ import {
   Easing,
   Pressable,
   StyleProp,
+  View,
   ViewStyle,
 } from "react-native";
 
@@ -270,11 +273,23 @@ export function AnimatedCheck({
   const reduced = useReducedMotion();
 
   useEffect(() => {
+    // FIX: раньше при reduced=true анимация всё равно запускалась через
+    // Animated.spring с useNativeDriver: true, при этом анимируется
+    // backgroundColor — Native Driver НЕ поддерживает анимацию цвета и
+    // кидает Invariant Violation ("Style property 'backgroundColor' is
+    // not supported by native animated module"). Это реальный краш на
+    // устройствах с включённым "уменьшить движение" в Accessibility.
+    // Теперь: при reduced — мгновенно выставляем значение без анимации,
+    // иначе — анимируем с useNativeDriver: false (обязательно для цвета).
+    if (reduced) {
+      anim.setValue(checked ? 1 : 0);
+      return;
+    }
     Animated.spring(anim, {
       toValue: checked ? 1 : 0,
       friction: 6,
       tension: 160,
-      useNativeDriver: reduced ? true : false,
+      useNativeDriver: false,
     }).start();
   }, [anim, checked, reduced]);
 
@@ -546,6 +561,314 @@ export function Confetti({ count = 14 }: { count?: number }) {
           }}
         />
       ))}
+    </Animated.View>
+  );
+}
+
+/* ----------------------------------------------------------- new additions */
+
+/**
+ * Глянцевый "3D"-бейдж вместо плоского эмодзи-стикера: градиент + блик +
+ * внутренняя тень снизу создают иллюзию объёма. Если передать `image`
+ * (require(...) на реальную PNG/3D-иконку), она покажется вместо эмодзи
+ * с плавным fade-in (expo-image transition). При монтировании слегка
+ * "выпрыгивает" пружиной для живости интерфейса.
+ *
+ * Требует зависимость `expo-image` (npx expo install expo-image).
+ */
+export function GlossyIconBadge({
+  emoji,
+  image,
+  gradientColors,
+  size = 46,
+  style,
+}: {
+  emoji?: string;
+  image?: any;
+  gradientColors: readonly [string, string, ...string[]];
+  size?: number;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const scale = useRef(new Animated.Value(0.6)).current;
+  const reduced = useReducedMotion();
+
+  useEffect(() => {
+    if (reduced) {
+      scale.setValue(1);
+      return;
+    }
+    Animated.spring(scale, {
+      toValue: 1,
+      friction: 6,
+      tension: 140,
+      useNativeDriver: true,
+    }).start();
+  }, [reduced, scale]);
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width: size,
+          height: size,
+          shadowColor: "#000",
+          shadowOpacity: 0.35,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 6 },
+          elevation: 8,
+          transform: [{ scale }],
+        },
+        style,
+      ]}
+    >
+      <LinearGradient
+        colors={gradientColors}
+        start={{ x: 0.15, y: 0.1 }}
+        end={{ x: 0.9, y: 1 }}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size * 0.32,
+          alignItems: "center",
+          justifyContent: "center",
+          overflow: "hidden",
+        }}
+      >
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            top: -size * 0.2,
+            left: -size * 0.2,
+            width: size * 0.7,
+            height: size * 0.7,
+            borderRadius: 999,
+            backgroundColor: "rgba(255,255,255,0.35)",
+            transform: [{ rotate: "-20deg" }],
+          }}
+        />
+        {image ? (
+          <ExpoImage
+            source={image}
+            style={{ width: size * 0.62, height: size * 0.62 }}
+            contentFit="contain"
+            transition={200}
+          />
+        ) : (
+          <Animated.Text
+            style={{
+              fontSize: size * 0.46,
+              color: "#fff",
+              fontWeight: "900",
+              textShadowColor: "rgba(0,0,0,0.25)",
+              textShadowOffset: { width: 0, height: 2 },
+              textShadowRadius: 3,
+            }}
+          >
+            {emoji}
+          </Animated.Text>
+        )}
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: "45%",
+            backgroundColor: "rgba(0,0,0,0.18)",
+          }}
+        />
+      </LinearGradient>
+    </Animated.View>
+  );
+}
+
+/**
+ * Мягкое "дыхание" по вертикали для декоративных элементов — иконки,
+ * трофеи, искры и т.д. Создаёт ощущение, что объект реально парит,
+ * а не статично нарисован.
+ */
+export function FloatY({
+  children,
+  distance = 6,
+  duration = 2200,
+}: {
+  children: React.ReactNode;
+  distance?: number;
+  duration?: number;
+}) {
+  const anim = useRef(new Animated.Value(0)).current;
+  const reduced = useReducedMotion();
+
+  useEffect(() => {
+    if (reduced) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, {
+          toValue: 1,
+          duration,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(anim, {
+          toValue: 0,
+          duration,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [anim, duration, reduced]);
+
+  return (
+    <Animated.View
+      style={{
+        transform: [
+          {
+            translateY: anim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [-distance, distance],
+            }),
+          },
+        ],
+      }}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
+/**
+ * Пульсирующее свечение позади элемента — хорошо смотрится под акцентными
+ * кнопками (например "Начать таймер" или главная CTA-кнопка).
+ */
+export function GlowPulse({
+  children,
+  color,
+  size = 70,
+}: {
+  children: React.ReactNode;
+  color: string;
+  size?: number;
+}) {
+  const anim = useRef(new Animated.Value(0)).current;
+  const reduced = useReducedMotion();
+
+  useEffect(() => {
+    if (reduced) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, {
+          toValue: 1,
+          duration: 1100,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(anim, {
+          toValue: 0,
+          duration: 1100,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [anim, reduced]);
+
+  return (
+    <View style={{ alignItems: "center", justifyContent: "center" }}>
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: color,
+          opacity: anim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0.0, 0.35],
+          }),
+          transform: [
+            {
+              scale: anim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0.75, 1.15],
+              }),
+            },
+          ],
+        }}
+      />
+      {children}
+    </View>
+  );
+}
+
+/**
+ * Бегущий диагональный блик — полезен для скелетонов загрузки или чтобы
+ * "оживить" статичную картинку/карточку лёгким движением света по ней.
+ * Оберните контент в `overflow: "hidden"` контейнер снаружи при необходимости.
+ */
+export function Shimmer({
+  width = 120,
+  height = "100%",
+}: {
+  width?: number;
+  height?: number | string;
+}) {
+  const anim = useRef(new Animated.Value(0)).current;
+  const reduced = useReducedMotion();
+
+  useEffect(() => {
+    if (reduced) return;
+    const loop = Animated.loop(
+      Animated.timing(anim, {
+        toValue: 1,
+        duration: 1400,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [anim, reduced]);
+
+  if (reduced) return null;
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={{
+        position: "absolute",
+        top: 0,
+        bottom: 0,
+        width,
+        height,
+        transform: [
+          {
+            translateX: anim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [-width, 400],
+            }),
+          },
+          { rotate: "12deg" },
+        ],
+      }}
+    >
+      <LinearGradient
+        colors={[
+          "rgba(255,255,255,0)",
+          "rgba(255,255,255,0.18)",
+          "rgba(255,255,255,0)",
+        ]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={{ flex: 1 }}
+      />
     </Animated.View>
   );
 }
