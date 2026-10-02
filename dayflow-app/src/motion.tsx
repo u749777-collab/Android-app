@@ -7,6 +7,7 @@ import {
   Easing,
   Pressable,
   StyleProp,
+  TextStyle,
   View,
   ViewStyle,
 } from "react-native";
@@ -331,7 +332,16 @@ export function AnimatedCheck({
   );
 }
 
-/** Title with a strike-through line that draws itself across the text. */
+/**
+ * Title with a strike-through line that draws itself across the text.
+ *
+ * FIX: раньше `style` имел тип StyleProp<ViewStyle>, хотя компонент
+ * рендерит <Animated.Text> и реально принимает текстовые стили
+ * (fontSize, fontWeight, color и т.д. из styles.rowTitle в App.tsx).
+ * TypeScript не компилировался из-за несовместимости ViewStyle/TextStyle
+ * в месте вызова <StrikeText style={styles.rowTitle} />. Теперь тип
+ * корректно указан как StyleProp<TextStyle>, а каст `as never` убран.
+ */
 export function StrikeText({
   text,
   done,
@@ -340,7 +350,7 @@ export function StrikeText({
 }: {
   text: string;
   done: boolean;
-  style?: StyleProp<ViewStyle>;
+  style?: StyleProp<TextStyle>;
   lineColor?: string;
 }) {
   const anim = useRef(new Animated.Value(done ? 1 : 0)).current;
@@ -361,7 +371,7 @@ export function StrikeText({
       <Animated.Text
         onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
         style={[
-          style as never,
+          style,
           {
             opacity: anim.interpolate({
               inputRange: [0, 1],
