@@ -24,7 +24,8 @@
           "color": "#7C3AED",
           "sounds": []
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "android": {
       "package": "com.dayflow.mobile",
@@ -40,7 +41,10 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE"
-      ]
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#0D1226"
+      }
     }
   }
 }
