@@ -97,8 +97,6 @@ const haptic = (style: "light" | "medium" | "success" = "light") => {
 };
 
 // Сигнальные звуки отключены — играет только фоновая музыка.
-// Определено на уровне модуля, чтобы ссылка была стабильной и не попадала
-// в зависимости useCallback/useEffect.
 const playSound = (_key: "complete" | "celebrate" | "timer") => {};
 
 /** Плавный переход между вкладками: fade + небольшой сдвиг вверх. */
@@ -128,7 +126,7 @@ const meta: Record<
 > = {
   sport: {
     icon: "⚡",
-    // image: require("./assets/icons/sport-3d.png"), // раскомментируйте после добавления файла
+    // image: require("./assets/icons/sport-3d.png"),
     color: colors.violetSoft,
     subtitle: "Сила и здоровье",
     gradient: gradient.sport,
@@ -195,8 +193,6 @@ function DayFlowApp() {
   const bgPlayer2 = useAudioPlayer(require("./sound-timer2.mp3"));
   const bgPlayer3 = useAudioPlayer(require("./sound-timer3.mp3"));
 
-  // Стабильная ссылка на массив плееров, чтобы эффекты не пересоздавались
-  // на каждый рендер (иначе музыка заикается).
   const bgPlayers = useMemo(
     () => [bgPlayer1, bgPlayer2, bgPlayer3],
     [bgPlayer1, bgPlayer2, bgPlayer3],
@@ -205,8 +201,6 @@ function DayFlowApp() {
   const [bgIndex, setBgIndex] = useState(0);
   const bgStatus = useAudioPlayerStatus(bgPlayers[bgIndex]);
   const lastPlayedIndexRef = useRef(-1);
-  // Защита от повторного срабатывания didJustFinish до того, как статус
-  // переключится на новый трек.
   const advancedRef = useRef(false);
 
   const completedFlags = useRef<Record<string, boolean>>({});
@@ -268,7 +262,6 @@ function DayFlowApp() {
     };
   }, []);
 
-  // Finish expired timers and roll the day over without writing every second.
   useEffect(() => {
     if (!ready) return;
     setData((prev) => {
@@ -712,8 +705,6 @@ function DayFlowApp() {
   }, []);
 
   // Переключаем трек, когда текущий доиграл до конца.
-  // advancedRef защищает от двойного срабатывания, пока bgIndex ещё не
-  // применился к состоянию.
   useEffect(() => {
     if (!bgStatus?.didJustFinish) {
       advancedRef.current = false;
@@ -725,19 +716,14 @@ function DayFlowApp() {
   }, [bgStatus?.didJustFinish, bgPlayers.length]);
 
   // Воспроизведение фоновой музыки.
-  //
-  // FIX: раньше в зависимостях был bgStatus?.playing. Когда трек завершался,
-  // playing становился false и эффект срабатывал РАНЬШЕ, чем setBgIndex
-  // применялся к состоянию — и вызывал .play() на уже завершённом треке.
-  // Получался короткий «чих» перед переключением. Теперь effect не зависит
-  // от playing и просто гарантирует, что играет именно текущий трек.
+  // Эффект не зависит от bgStatus?.playing, иначе при завершении трека
+  // .play() вызывается раньше, чем применяется новый bgIndex.
   useEffect(() => {
     if (!ready) return;
 
     const current = bgPlayers[bgIndex];
     if (!current) return;
 
-    // Все треки, кроме текущего, ставим на паузу.
     bgPlayers.forEach((p, i) => {
       if (i !== bgIndex) {
         try {
@@ -1357,6 +1343,13 @@ function TabBar({
 
   const itemWidth = width / TABS.length;
 
+  const translateX = reduced
+    ? itemWidth * index
+    : anim.interpolate({
+        inputRange: [0, TABS.length - 1],
+        outputRange: [0, itemWidth * (TABS.length - 1)],
+      });
+
   return (
     <View
       style={[styles.tabBar, { bottom: 14 + bottomInset }]}
@@ -1364,22 +1357,12 @@ function TabBar({
     >
       {width > 0 && (
         <Animated.View
-          style={[
-            styles.tabIndicator,
-            {
-              width: itemWidth,
-              transform: [
-                {
-                  translateX: reduced
-                    ? itemWidth * index
-                    : anim.interpolate({
-                        inputRange: [0, TABS.length - 1],
-                        outputRange: [0, itemWidth * (TABS.length - 1)],
-                      }),
-                },
-              ],
-            },
-          ]}
+          style={
+            [
+              styles.tabIndicator,
+              { width: itemWidth, transform: [{ translateX }] },
+            ] as any
+          }
         />
       )}
       {TABS.map((item) => {
