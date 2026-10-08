@@ -8,6 +8,7 @@
     "platforms": ["android"],
     "backgroundColor": "#0D1226",
     "primaryColor": "#7C3AED",
+    "newArchEnabled": false,
     "androidStatusBar": {
       "barStyle": "light-content",
       "backgroundColor": "#00000000",
@@ -31,6 +32,8 @@
       "package": "com.dayflow.mobile",
       "versionCode": 1,
       "edgeToEdgeEnabled": true,
+      "enableProguardInReleaseBuilds": false,
+      "enableShrinkResourcesInReleaseBuilds": false,
       "permissions": [
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.VIBRATE",
