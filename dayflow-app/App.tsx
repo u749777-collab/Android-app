@@ -96,6 +96,11 @@ const haptic = (style: "light" | "medium" | "success" = "light") => {
   }
 };
 
+// Сигнальные звуки отключены — играет только фоновая музыка.
+// Определено на уровне модуля, чтобы ссылка была стабильной и не попадала
+// в зависимости useCallback/useEffect.
+const playSound = (_key: "complete" | "celebrate" | "timer") => {};
+
 /** Плавный переход между вкладками: fade + небольшой сдвиг вверх. */
 function useTabTransition(current: Tab) {
   const anim = useRef(new Animated.Value(0)).current;
@@ -182,7 +187,6 @@ function DayFlowApp() {
   const [nameInput, setNameInput] = useState("");
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const soundEnabledRef = useRef(true);
 
   const tabAnim = useTabTransition(tab);
 
@@ -191,10 +195,8 @@ function DayFlowApp() {
   const bgPlayer2 = useAudioPlayer(require("./sound-timer2.mp3"));
   const bgPlayer3 = useAudioPlayer(require("./sound-timer3.mp3"));
 
-  // FIX: раньше этот массив пересоздавался на каждый рендер (в т.ч. каждую
-  // секунду из-за тикера `now`), из-за чего ниже стоящий эффект с зависимостью
-  // от bgPlayers срабатывал ежесекундно и дёргал .play() заново — музыка
-  // заикалась/перезапускалась. useMemo фиксирует ссылку на массив.
+  // Стабильная ссылка на массив плееров, чтобы эффекты не пересоздавались
+  // на каждый рендер (иначе музыка заикается).
   const bgPlayers = useMemo(
     () => [bgPlayer1, bgPlayer2, bgPlayer3],
     [bgPlayer1, bgPlayer2, bgPlayer3],
@@ -203,6 +205,9 @@ function DayFlowApp() {
   const [bgIndex, setBgIndex] = useState(0);
   const bgStatus = useAudioPlayerStatus(bgPlayers[bgIndex]);
   const lastPlayedIndexRef = useRef(-1);
+  // Защита от повторного срабатывания didJustFinish до того, как статус
+  // переключится на новый трек.
+  const advancedRef = useRef(false);
 
   const completedFlags = useRef<Record<string, boolean>>({});
   const initialised = useRef(false);
@@ -508,8 +513,6 @@ function DayFlowApp() {
         return;
       }
 
-      // FIX: раньше при редактировании не было валидации (можно было сохранить
-      // некорректное время/лимит) — теперь проверяем так же, как при создании.
       if (existing.category === "leisure") {
         const value = Number(minutes.replace(",", "."));
         if (!Number.isFinite(value) || value <= 0 || value > 24 * 60) {
@@ -528,8 +531,6 @@ function DayFlowApp() {
       let reminderId = existing.reminderId;
       const nextReminderTime = reminder.trim();
 
-      // FIX: раньше при изменении времени напоминания старое уведомление
-      // оставалось запланированным на старое время, а новое не создавалось.
       if (
         existing.category !== "leisure" &&
         nextReminderTime !== existing.reminderTime
@@ -694,10 +695,6 @@ function DayFlowApp() {
   };
 
   useEffect(() => {
-    soundEnabledRef.current = soundEnabled;
-  }, [soundEnabled]);
-
-  useEffect(() => {
     let alive = true;
     (async () => {
       try {
@@ -705,7 +702,6 @@ function DayFlowApp() {
         if (!alive) return;
         const enabled = stored !== "false";
         setSoundEnabled(enabled);
-        soundEnabledRef.current = enabled;
       } catch {
         // sounds not critical
       }
@@ -716,28 +712,32 @@ function DayFlowApp() {
   }, []);
 
   // Переключаем трек, когда текущий доиграл до конца.
+  // advancedRef защищает от двойного срабатывания, пока bgIndex ещё не
+  // применился к состоянию.
   useEffect(() => {
-    if (bgStatus?.didJustFinish) {
-      setBgIndex((i) => (i + 1) % bgPlayers.length);
+    if (!bgStatus?.didJustFinish) {
+      advancedRef.current = false;
+      return;
     }
+    if (advancedRef.current) return;
+    advancedRef.current = true;
+    setBgIndex((i) => (i + 1) % bgPlayers.length);
   }, [bgStatus?.didJustFinish, bgPlayers.length]);
 
-  // FIX: музыка. Раньше этот эффект пересоздавался каждую секунду из-за
-  // нестабильного bgPlayers и дёргал .play() заново — звук заикался.
-  // Теперь bgPlayers стабилен (useMemo), а play() вызывается только если
-  // трек реально не играет (по bgStatus.playing).
+  // Воспроизведение фоновой музыки.
+  //
+  // FIX: раньше в зависимостях был bgStatus?.playing. Когда трек завершался,
+  // playing становился false и эффект срабатывал РАНЬШЕ, чем setBgIndex
+  // применялся к состоянию — и вызывал .play() на уже завершённом треке.
+  // Получался короткий «чих» перед переключением. Теперь effect не зависит
+  // от playing и просто гарантирует, что играет именно текущий трек.
   useEffect(() => {
     if (!ready) return;
 
-    if (!soundEnabled) {
-      bgPlayers.forEach((p) => {
-        try {
-          p.pause();
-        } catch {}
-      });
-      return;
-    }
+    const current = bgPlayers[bgIndex];
+    if (!current) return;
 
+    // Все треки, кроме текущего, ставим на паузу.
     bgPlayers.forEach((p, i) => {
       if (i !== bgIndex) {
         try {
@@ -746,28 +746,28 @@ function DayFlowApp() {
       }
     });
 
-    const current = bgPlayers[bgIndex];
-    if (!current) return;
+    if (!soundEnabled) {
+      try {
+        current.pause();
+      } catch {}
+      return;
+    }
 
     try {
       current.volume = 0.35;
       if (lastPlayedIndexRef.current !== bgIndex) {
-        current.seekTo(0);
         lastPlayedIndexRef.current = bgIndex;
+        try {
+          current.seekTo(0);
+        } catch {}
       }
-      if (!bgStatus?.playing) {
-        current.play();
-      }
+      current.play();
     } catch {}
-  }, [ready, soundEnabled, bgIndex, bgPlayers, bgStatus?.playing]);
-
-  // Сигнальные звуки отключены — играет только фоновая музыка.
-  const playSound = (_key: "complete" | "celebrate" | "timer") => {};
+  }, [ready, soundEnabled, bgIndex, bgPlayers]);
 
   const toggleSound = async (value: boolean) => {
     haptic("light");
     setSoundEnabled(value);
-    soundEnabledRef.current = value;
     await AsyncStorage.setItem("dayflow_sound", value ? "true" : "false");
   };
 
@@ -782,8 +782,6 @@ function DayFlowApp() {
           initialised.current = false;
           haptic("medium");
           gentleLayout();
-          // FIX: раньше объект данных собирался вручную и мог разойтись
-          // со схемой AppData — теперь берём базовую форму из defaultData().
           setData((prev) => ({
             ...defaultData(),
             date: todayKey(),
@@ -1068,7 +1066,6 @@ function DayFlowApp() {
                   </View>
                 </FadeSlide>
                 <SettingsScreen
-                  key="settings"
                   data={data}
                   permissionDenied={permissionDenied}
                   onToggleNotifications={setNotifications}
@@ -1209,7 +1206,7 @@ function AmbientGlow() {
         style={[
           styles.glow,
           styles.glowViolet,
-          { transform: [{ translateY: drift(-20, 30) }, { scale: 1 }] },
+          { transform: [{ translateY: drift(-20, 30) }] },
         ]}
       />
       <Animated.View
