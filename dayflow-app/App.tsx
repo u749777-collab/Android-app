@@ -49,7 +49,10 @@ import {
   AnimatedCheck,
   Confetti,
   FadeSlide,
+  FloatY,
   GlossyIconBadge,
+  ICONS,
+  Icon,
   PopIn,
   ProgressBar,
   PulseDot,
@@ -85,11 +88,13 @@ const STATUS_BAR_HEIGHT = RNStatusBar.currentHeight ?? 24;
 const haptic = (style: "light" | "medium" | "success" = "light") => {
   try {
     if (style === "success") {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+        () => {},
+      );
     } else if (style === "medium") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     } else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     }
   } catch {
     // haptics not critical
@@ -117,40 +122,36 @@ function useTabTransition(current: Tab) {
 const meta: Record<
   Category,
   {
-    icon: string;
-    image?: any;
+    image: any;
     color: string;
     subtitle: string;
     gradient: readonly [string, string];
   }
 > = {
   sport: {
-    icon: "⚡",
-    // image: require("./assets/icons/sport-3d.png"),
+    image: ICONS.sport,
     color: colors.violetSoft,
     subtitle: "Сила и здоровье",
     gradient: gradient.sport,
   },
   study: {
-    icon: "📚",
-    // image: require("./assets/icons/study-3d.png"),
+    image: ICONS.study,
     color: colors.blueSoft,
     subtitle: "Знания и развитие",
     gradient: gradient.study,
   },
   leisure: {
-    icon: "◷",
-    // image: require("./assets/icons/leisure-3d.png"),
+    image: ICONS.leisure,
     color: colors.cyan,
     subtitle: "Отдых под контролем",
     gradient: gradient.leisure,
   },
 };
 
-const TABS: Array<{ key: Tab; icon: string; label: string }> = [
-  { key: "today", icon: "⌂", label: "Сегодня" },
-  { key: "stats", icon: "▥", label: "Статистика" },
-  { key: "settings", icon: "⚙", label: "Настройки" },
+const TABS: Array<{ key: Tab; icon: any; label: string }> = [
+  { key: "today", icon: ICONS.home, label: "Сегодня" },
+  { key: "stats", icon: ICONS.stats, label: "Статистика" },
+  { key: "settings", icon: ICONS.settings, label: "Настройки" },
 ];
 
 const gentleLayout = () =>
@@ -219,7 +220,12 @@ function DayFlowApp() {
         loaded = defaultData();
       }
       const rolled = rollOverIfNewDay(loaded);
-      const storedName = await AsyncStorage.getItem("dayflow_name");
+      let storedName: string | null = null;
+      try {
+        storedName = await AsyncStorage.getItem("dayflow_name");
+      } catch {
+        storedName = null;
+      }
       if (!alive) return;
       setData(rolled);
       if (!storedName) {
@@ -229,12 +235,16 @@ function DayFlowApp() {
       }
       setReady(true);
       if (rolled.notifications) {
-        const granted = await ensurePermission();
-        if (!alive) return;
-        setPermissionDenied(!granted);
-        if (granted) {
-          const tasks = await rescheduleReminders(rolled.tasks);
-          if (alive) setData((prev) => ({ ...prev, tasks }));
+        try {
+          const granted = await ensurePermission();
+          if (!alive) return;
+          setPermissionDenied(!granted);
+          if (granted) {
+            const tasks = await rescheduleReminders(rolled.tasks);
+            if (alive) setData((prev) => ({ ...prev, tasks }));
+          }
+        } catch {
+          // уведомления не критичны для запуска
         }
       }
     })();
@@ -645,7 +655,7 @@ function DayFlowApp() {
     Alert.alert(task.title, "Что хочешь сделать?", [
       { text: "Отмена", style: "cancel" },
       {
-        text: "✏️ Внести правку",
+        text: "Внести правку",
         onPress: () => {
           setEditTaskId(task.id);
           setSheet(task.category);
@@ -659,7 +669,7 @@ function DayFlowApp() {
         },
       },
       {
-        text: "🗑 Удалить",
+        text: "Удалить",
         style: "destructive",
         onPress: () => removeTask(task),
       },
@@ -839,7 +849,7 @@ function DayFlowApp() {
                     </View>
                     <Spin duration={14000}>
                       <GlossyIconBadge
-                        emoji="✦"
+                        image={ICONS.spark}
                         gradientColors={["#7C3AED", "#A78BFA"]}
                         size={52}
                       />
@@ -855,6 +865,7 @@ function DayFlowApp() {
                     style={styles.hero}
                   >
                     <View style={styles.heroShine} pointerEvents="none" />
+                    <View style={styles.heroShine2} pointerEvents="none" />
                     <View style={styles.heroTop}>
                       <View>
                         <Text style={styles.heroLabel}>ПРОГРЕСС ДНЯ</Text>
@@ -872,9 +883,9 @@ function DayFlowApp() {
                     <View style={styles.heroChips}>
                       {sections.map((section) => (
                         <View key={section.category} style={styles.chip}>
+                          <Icon source={meta[section.category].image} size={16} />
                           <Text style={styles.chipText}>
-                            {meta[section.category].icon} {section.done}/
-                            {section.tasks.length}
+                            {section.done}/{section.tasks.length}
                           </Text>
                         </View>
                       ))}
@@ -925,7 +936,7 @@ function DayFlowApp() {
                           onPress={() => openSheet(section.category)}
                           scaleTo={0.88}
                         >
-                          <Text style={styles.addText}>＋</Text>
+                          <Icon source={ICONS.plus} size={20} tint={colors.violetSoft} />
                         </Tappable>
                       </View>
 
@@ -983,7 +994,7 @@ function DayFlowApp() {
                     >
                       <Spin duration={11000}>
                         <GlossyIconBadge
-                          emoji="✦"
+                          image={ICONS.spark}
                           gradientColors={["#7C3AED", "#A78BFA"]}
                           size={40}
                         />
@@ -1001,7 +1012,13 @@ function DayFlowApp() {
                 {total === 0 && (
                   <FadeSlide delay={220}>
                     <View style={styles.emptyDay}>
-                      <Text style={styles.emptyDayIcon}>◌</Text>
+                      <FloatY>
+                        <GlossyIconBadge
+                          image={ICONS.spark}
+                          gradientColors={["#4C3B9E", "#7C3AED"]}
+                          size={64}
+                        />
+                      </FloatY>
                       <Text style={styles.emptyDayTitle}>План пуст</Text>
                       <Text style={styles.emptyDayCopy}>
                         Добавь упражнение, учебную задачу или лимит отдыха,
@@ -1027,9 +1044,11 @@ function DayFlowApp() {
                 <FadeSlide>
                   <View style={styles.soundCard}>
                     <View style={styles.soundCardLeft}>
-                      <Text style={styles.soundCardIcon}>
-                        {soundEnabled ? "🔊" : "🔇"}
-                      </Text>
+                      <Icon
+                        source={soundEnabled ? ICONS.volumeOn : ICONS.volumeOff}
+                        size={28}
+                        tint={soundEnabled ? colors.violetSoft : colors.textFaint}
+                      />
                       <View>
                         <Text style={styles.soundCardTitle}>Музыка</Text>
                         <Text style={styles.soundCardSub}>
@@ -1283,7 +1302,7 @@ function LeisureRow({
             onPress={onReset}
             accessibilityLabel="Сбросить таймер"
           >
-            <Text style={styles.smallGhostText}>↺</Text>
+            <Icon source={ICONS.reset} size={18} tint={colors.textDim} />
           </Tappable>
         ) : (
           <View style={styles.leisureActions}>
@@ -1293,7 +1312,11 @@ function LeisureRow({
               scaleTo={0.9}
               accessibilityLabel={task.isRunning ? "Пауза" : "Начать"}
             >
-              <Text style={styles.playText}>{task.isRunning ? "‖" : "▶"}</Text>
+              <Icon
+                source={task.isRunning ? ICONS.pause : ICONS.play}
+                size={20}
+                tint={colors.cyan}
+              />
             </Tappable>
             <Tappable
               style={styles.smallGhostFinish}
@@ -1301,7 +1324,7 @@ function LeisureRow({
               scaleTo={0.9}
               accessibilityLabel="Завершить"
             >
-              <Text style={styles.finishText}>✓</Text>
+              <Icon source={ICONS.check} size={18} tint={colors.green} />
             </Tappable>
           </View>
         )}
@@ -1375,9 +1398,11 @@ function TabBar({
             scaleTo={0.92}
             accessibilityLabel={item.label}
           >
-            <Text style={[styles.tabIcon, isActive && styles.tabActive]}>
-              {item.icon}
-            </Text>
+            <Icon
+              source={item.icon}
+              size={isActive ? 24 : 22}
+              tint={isActive ? colors.violetSoft : colors.textFaint}
+            />
             <Text style={[styles.tabLabel, isActive && styles.tabActive]}>
               {item.label}
             </Text>
@@ -1536,13 +1561,15 @@ function CelebrationModal({
             style={styles.celebrateInner}
           >
             <Spin duration={7000}>
-              <Text style={styles.celebrateSpark}>✦</Text>
+              <Icon source={ICONS.spark} size={30} />
             </Spin>
-            <GlossyIconBadge
-              emoji="🏆"
-              gradientColors={["#F59E0B", "#FDE68A"]}
-              size={84}
-            />
+            <FloatY distance={5}>
+              <GlossyIconBadge
+                image={ICONS.trophy}
+                gradientColors={["#F59E0B", "#FDE68A"]}
+                size={96}
+              />
+            </FloatY>
             <Text style={styles.celebrateTitle}>Отличная работа!</Text>
             <Text style={styles.celebrateCopy}>{message}</Text>
             <Tappable style={styles.celebrateButton} onPress={onClose}>
@@ -1576,7 +1603,10 @@ function NamePromptModal({
       <View style={styles.nameModalOverlay}>
         <KeyboardAvoidingView behavior="padding">
           <View style={styles.nameModalCard}>
-            <Text style={styles.nameModalTitle}>👋 Как тебя зовут?</Text>
+            <View style={styles.nameModalHead}>
+              <Icon source={ICONS.spark} size={30} />
+              <Text style={styles.nameModalTitle}>Как тебя зовут?</Text>
+            </View>
             <Text style={styles.nameModalSub}>
               DayFlow будет приветствовать тебя по имени
             </Text>
@@ -1669,6 +1699,11 @@ const styles = StyleSheet.create({
     padding: space.xl,
     marginBottom: space.xl,
     overflow: "hidden",
+    shadowColor: "#7C3AED",
+    shadowOpacity: 0.55,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 12,
   },
   heroShine: {
     position: "absolute",
@@ -1678,6 +1713,15 @@ const styles = StyleSheet.create({
     height: 180,
     borderRadius: 999,
     backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  heroShine2: {
+    position: "absolute",
+    bottom: -70,
+    left: -40,
+    width: 160,
+    height: 160,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.07)",
   },
   heroTop: {
     flexDirection: "row",
@@ -1713,10 +1757,15 @@ const styles = StyleSheet.create({
     marginTop: space.lg,
   },
   chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
     paddingHorizontal: space.md,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
   },
   chipText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
   heroCopy: {
@@ -1740,6 +1789,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     padding: space.lg,
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 5,
   },
   cardHead: { flexDirection: "row", alignItems: "center" },
   cardInfo: { flex: 1, marginLeft: space.md },
@@ -1751,7 +1805,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(124, 58, 237, 0.16)",
+    backgroundColor: "rgba(124, 58, 237, 0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(167, 139, 250, 0.3)",
   },
   addText: { color: colors.violetSoft, fontSize: 22, fontWeight: "700" },
   cardProgress: { marginTop: space.md },
@@ -1860,11 +1916,16 @@ const styles = StyleSheet.create({
     bottom: 14,
     height: 74,
     borderRadius: 24,
-    backgroundColor: "rgba(20, 22, 40, 0.95)",
+    backgroundColor: "rgba(20, 22, 40, 0.97)",
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "rgba(167, 139, 250, 0.22)",
     flexDirection: "row",
     padding: 8,
+    shadowColor: "#7C3AED",
+    shadowOpacity: 0.4,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 14,
   },
   tabIndicator: {
     position: "absolute",
@@ -2032,11 +2093,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  nameModalHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 8,
+  },
   nameModalTitle: {
     color: colors.text,
     fontSize: 22,
     fontWeight: "900",
-    marginBottom: 8,
   },
   nameModalSub: {
     color: colors.textDim,
