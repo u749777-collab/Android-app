@@ -76,6 +76,17 @@ import {
 import { SettingsScreen, StatsScreen } from "./src/screens";
 import { colors, gradient, radius, space } from "./src/theme";
 import { AppData, Category, Tab, Task } from "./src/types";
+import {
+  bootLog,
+  clearBootLog,
+  DebugErrorBoundary,
+  DebugScreen,
+  installGlobalErrorHandlers,
+  readBootLog,
+} from "./src/debug";
+
+installGlobalErrorHandlers();
+bootLog("module:imports-ok");
 
 // DayFlow is an Android-only app; LayoutAnimation needs this flag on Android.
 if (UIManager.setLayoutAnimationEnabledExperimental) {
@@ -118,6 +129,14 @@ function useTabTransition(current: Tab) {
   }, [current, anim]);
   return anim;
 }
+
+// Фоновые треки. Один плеер, три источника — переключаем через replace().
+// Так надёжно решается проблема "играет только первый трек".
+const BACKGROUND_TRACKS = [
+  require("./sound-timer.mp3"),
+  require("./sound-timer2.mp3"),
+  require("./sound-timer3.mp3"),
+] as const;
 
 const meta: Record<
   Category,
@@ -169,6 +188,7 @@ const gentleLayout = () =>
   });
 
 function DayFlowApp() {
+  bootLog("DayFlowApp:enter");
   const insets = useSafeAreaInsets();
   const [data, setData] = useState<AppData>(() => defaultData());
   const [ready, setReady] = useState(false);
@@ -188,21 +208,19 @@ function DayFlowApp() {
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   const tabAnim = useTabTransition(tab);
+  bootLog("DayFlowApp:tabAnim:ok");
 
-  // expo-audio: три фоновых трека играют по кругу 1 → 2 → 3 → 1 …
-  const bgPlayer1 = useAudioPlayer(require("./sound-timer.mp3"));
-  const bgPlayer2 = useAudioPlayer(require("./sound-timer2.mp3"));
-  const bgPlayer3 = useAudioPlayer(require("./sound-timer3.mp3"));
+  /* ------------------------------ audio ------------------------------ */
 
-  const bgPlayers = useMemo(
-    () => [bgPlayer1, bgPlayer2, bgPlayer3],
-    [bgPlayer1, bgPlayer2, bgPlayer3],
-  );
+  bootLog("audio:init:start");
+  const bgPlayer = useAudioPlayer(BACKGROUND_TRACKS[0]);
+  bootLog("audio:player:ok");
+  const bgStatus = useAudioPlayerStatus(bgPlayer);
+  bootLog("audio:status:ok");
 
-  const [bgIndex, setBgIndex] = useState(0);
-  const bgStatus = useAudioPlayerStatus(bgPlayers[bgIndex]);
-  const lastPlayedIndexRef = useRef(-1);
-  const advancedRef = useRef(false);
+  const [trackIndex, setTrackIndex] = useState(0);
+  const loadedTrackRef = useRef(0);
+  const lastFinishAtRef = useRef(0);
 
   const completedFlags = useRef<Record<string, boolean>>({});
   const initialised = useRef(false);
@@ -212,20 +230,25 @@ function DayFlowApp() {
   useEffect(() => {
     let alive = true;
     (async () => {
+      bootLog("loading:effect:start");
       let loaded = defaultData();
       try {
         const raw = await AsyncStorage.getItem(STORE_KEY);
         if (raw) loaded = normalize(JSON.parse(raw));
-      } catch {
+      } catch (e) {
+        bootLog("loading:read:failed", e);
         loaded = defaultData();
       }
+      bootLog("loading:store:ok");
       const rolled = rollOverIfNewDay(loaded);
+      bootLog("loading:rollover:ok");
       let storedName: string | null = null;
       try {
         storedName = await AsyncStorage.getItem("dayflow_name");
       } catch {
         storedName = null;
       }
+      bootLog("loading:name:ok");
       if (!alive) return;
       setData(rolled);
       if (!storedName) {
@@ -234,6 +257,7 @@ function DayFlowApp() {
         setUserName(storedName);
       }
       setReady(true);
+      bootLog("loading:READY");
       if (rolled.notifications) {
         try {
           const granted = await ensurePermission();
@@ -714,52 +738,40 @@ function DayFlowApp() {
     };
   }, []);
 
-  // Переключаем трек, когда текущий доиграл до конца.
-  useEffect(() => {
-    if (!bgStatus?.didJustFinish) {
-      advancedRef.current = false;
-      return;
-    }
-    if (advancedRef.current) return;
-    advancedRef.current = true;
-    setBgIndex((i) => (i + 1) % bgPlayers.length);
-  }, [bgStatus?.didJustFinish, bgPlayers.length]);
+  // ---- Музыка: один плеер, смена трека через replace() ----
 
-  // Воспроизведение фоновой музыки.
-  // Эффект не зависит от bgStatus?.playing, иначе при завершении трека
-  // .play() вызывается раньше, чем применяется новый bgIndex.
+  // Переключение на следующий трек, когда текущий доиграл.
+  // Защита от двойного срабатывания: не чаще, чем раз в 500мс.
+  useEffect(() => {
+    if (!bgStatus?.didJustFinish) return;
+    const nowMs = Date.now();
+    if (nowMs - lastFinishAtRef.current < 500) return;
+    lastFinishAtRef.current = nowMs;
+    setTrackIndex((i) => (i + 1) % BACKGROUND_TRACKS.length);
+  }, [bgStatus?.didJustFinish]);
+
+  // Воспроизведение. Если трек сменился — replace() + play().
   useEffect(() => {
     if (!ready) return;
 
-    const current = bgPlayers[bgIndex];
-    if (!current) return;
-
-    bgPlayers.forEach((p, i) => {
-      if (i !== bgIndex) {
-        try {
-          p.pause();
-        } catch {}
-      }
-    });
-
     if (!soundEnabled) {
       try {
-        current.pause();
+        bgPlayer.pause();
       } catch {}
       return;
     }
 
     try {
-      current.volume = 0.35;
-      if (lastPlayedIndexRef.current !== bgIndex) {
-        lastPlayedIndexRef.current = bgIndex;
+      if (loadedTrackRef.current !== trackIndex) {
+        loadedTrackRef.current = trackIndex;
         try {
-          current.seekTo(0);
+          bgPlayer.replace(BACKGROUND_TRACKS[trackIndex]);
         } catch {}
       }
-      current.play();
+      bgPlayer.volume = 0.35;
+      bgPlayer.play();
     } catch {}
-  }, [ready, soundEnabled, bgIndex, bgPlayers]);
+  }, [ready, soundEnabled, trackIndex, bgPlayer]);
 
   const toggleSound = async (value: boolean) => {
     haptic("light");
@@ -883,7 +895,10 @@ function DayFlowApp() {
                     <View style={styles.heroChips}>
                       {sections.map((section) => (
                         <View key={section.category} style={styles.chip}>
-                          <Icon source={meta[section.category].image} size={16} />
+                          <Icon
+                            source={meta[section.category].image}
+                            size={16}
+                          />
                           <Text style={styles.chipText}>
                             {section.done}/{section.tasks.length}
                           </Text>
@@ -916,7 +931,6 @@ function DayFlowApp() {
                     <View style={styles.card}>
                       <View style={styles.cardHead}>
                         <GlossyIconBadge
-                          emoji={meta[section.category].icon}
                           image={meta[section.category].image}
                           gradientColors={meta[section.category].gradient}
                           size={46}
@@ -936,7 +950,11 @@ function DayFlowApp() {
                           onPress={() => openSheet(section.category)}
                           scaleTo={0.88}
                         >
-                          <Icon source={ICONS.plus} size={20} tint={colors.violetSoft} />
+                          <Icon
+                            source={ICONS.plus}
+                            size={20}
+                            tint={colors.violetSoft}
+                          />
                         </Tappable>
                       </View>
 
@@ -1047,7 +1065,9 @@ function DayFlowApp() {
                       <Icon
                         source={soundEnabled ? ICONS.volumeOn : ICONS.volumeOff}
                         size={28}
-                        tint={soundEnabled ? colors.violetSoft : colors.textFaint}
+                        tint={
+                          soundEnabled ? colors.violetSoft : colors.textFaint
+                        }
                       />
                       <View>
                         <Text style={styles.soundCardTitle}>Музыка</Text>
@@ -1128,9 +1148,54 @@ function DayFlowApp() {
 }
 
 export default function App() {
+  const [state, setState] = React.useState<"checking" | "normal" | "debug">(
+    "checking",
+  );
+
+  React.useEffect(() => {
+    (async () => {
+      const log = await readBootLog();
+      const last = log[log.length - 1] || "";
+      const wasReady = last.includes(":READY");
+      const hadError = log.some(
+        (l) => l.includes("JS_ERROR") || l.includes("REACT_RENDER_ERROR"),
+      );
+      if (log.length > 0 && (!wasReady || hadError)) {
+        setState("debug");
+      } else {
+        await clearBootLog();
+        setState("normal");
+      }
+    })();
+  }, []);
+
+  if (state === "checking") {
+    return (
+      <SafeAreaProvider>
+        <SplashScreen />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (state === "debug") {
+    return (
+      <SafeAreaProvider>
+        <DebugScreen
+          showTryAgain
+          onTryAgain={async () => {
+            await clearBootLog();
+            setState("normal");
+          }}
+        />
+      </SafeAreaProvider>
+    );
+  }
+
   return (
     <SafeAreaProvider>
-      <DayFlowApp />
+      <DebugErrorBoundary>
+        <DayFlowApp />
+      </DebugErrorBoundary>
     </SafeAreaProvider>
   );
 }
