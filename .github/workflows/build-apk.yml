@@ -50,14 +50,11 @@ jobs:
           pwd
           echo "=== Файлы ==="
           ls -la
-          echo "=== package.json ==="
-          if [ -f package.json ]; then
-            echo "OK: package.json найден"
-          else
+          if [ ! -f package.json ]; then
             echo "ОШИБКА: package.json не найден"
             exit 1
           fi
-          echo "=== mp3 в проекте (кроме node_modules) ==="
+          echo "=== mp3 в проекте ==="
           find . -name "*.mp3" -not -path "./node_modules/*" || echo "mp3 не найдены"
 
       - name: Install dependencies
@@ -100,3 +97,4 @@ jobs:
           name: DayFlow-apk
           path: dayflow-app/out/DayFlow.apk
           retention-days: 30
+          
