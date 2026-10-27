@@ -1018,7 +1018,9 @@ function DayFlowApp() {
                         />
                       </Spin>
                       <View style={styles.flexShrink}>
-                        <Text style={styles.motivationTitle}>Нужен импульс?</Text>
+                        <Text style={styles.motivationTitle}>
+                          Нужен импульс?
+                        </Text>
                         <Text style={styles.motivationCopy}>
                           Нажми — DayFlow пришлёт мотивацию
                         </Text>
